@@ -1,4 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+##### Enjoy this spagheti VRAM optimizations done by DeepBeepMeep !
+# I am sure you are a nice person and as you copy this code, you will give me officially proper credits:
+# Please link to https://github.com/deepbeepmeep/Wan2GP and @deepbeepmeep on twitter  
 import math
 from einops import rearrange
 import torch
@@ -176,6 +179,70 @@ class WanSelfAttention(nn.Module):
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
 
+    def text_cross_attention(self, xlist, context, return_q = False):
+        x = xlist[0]
+        xlist.clear()
+        b, n, d = x.size(0), self.num_heads, self.head_dim
+        nag_scale = offload.shared_state.get("_nag_scale",0)
+        # compute query, key, value
+        q = self.q(x)
+        del x
+        self.norm_q(q)
+        q= q.view(b, -1, n, d)
+        k = self.k(context)
+        self.norm_k(k)
+        k = k.view(context.shape[0], -1, n, d)
+        v = self.v(context).view(context.shape[0], -1, n, d)
+
+        if nag_scale <= 1 or len(k)==1:
+            qvl_list=[q, k, v]
+            if not return_q: del q
+            del k, v
+            x = pay_attention(qvl_list,  cross_attn= True)
+            x = x.flatten(2, 3)
+        else:
+            nag_tau = offload.shared_state["_nag_tau"]
+            nag_alpha = offload.shared_state["_nag_alpha"]
+            qvl_list=[q, k[:1], v[:1]]
+            x_pos = pay_attention(qvl_list,  cross_attn= True)
+            qvl_list=[q, k[1:], v[1:]]
+            if not return_q: del q
+            del k, v
+            x_neg = pay_attention(qvl_list,  cross_attn= True)
+
+            x_pos = x_pos.flatten(2, 3)
+            x_neg = x_neg.flatten(2, 3)
+            # Behold DeepBeepMeep as the NAG Butcher !: reduce highly VRAM consumption while at the same time turn the source in gibberish
+            x_neg.mul_(1-nag_scale)
+            x_neg.add_(x_pos, alpha= nag_scale)
+            x_guidance = x_neg
+            del x_neg
+            norm_positive = torch.norm(x_pos, p=1, dim=-1, keepdim=True)
+            norm_guidance = torch.norm(x_guidance, p=1, dim=-1, keepdim=True)
+            scale = norm_guidance / norm_positive
+            scale = torch.nan_to_num(scale, 10)
+            factor = 1 / (norm_guidance + 1e-7) * norm_positive * nag_tau
+            x_guidance = torch.where(scale > nag_tau, x_guidance * factor, x_guidance )
+            del norm_positive, norm_guidance 
+            x_pos.mul_(1 - nag_alpha)
+            x_guidance.mul_(nag_alpha)
+            x_guidance.add_(x_pos)
+            x = x_guidance
+
+            # x_guidance = x_pos * nag_scale - x_neg * (nag_scale - 1)
+            # norm_positive = torch.norm(x_pos, p=1, dim=-1, keepdim=True).expand(*x_pos.shape)
+            # norm_guidance = torch.norm(x_guidance, p=1, dim=-1, keepdim=True).expand(*x_guidance.shape)
+
+            # scale = norm_guidance / norm_positive
+            # scale = torch.nan_to_num(scale, 10)
+            # x_guidance[scale > nag_tau] =  x_guidance[scale > nag_tau] / (norm_guidance[scale > nag_tau] + 1e-7) * norm_positive[scale > nag_tau] * nag_tau
+
+            # x = x_guidance * nag_alpha + x_pos * (1 - nag_alpha)
+        if return_q:
+            return x, q
+        else:
+            return x, None
+    
     def forward(self, xlist, grid_sizes, freqs, block_mask = None, ref_target_masks = None, ref_images_count = 0):
         r"""
         Args:
@@ -246,28 +313,7 @@ class WanT2VCrossAttention(WanSelfAttention):
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C]
         """
-        x = xlist[0]
-        xlist.clear()
-        b, n, d = x.size(0), self.num_heads, self.head_dim
-
-        # compute query, key, value
-        q = self.q(x)
-        del x
-        self.norm_q(q)
-        q= q.view(b, -1, n, d)
-        k = self.k(context)
-        self.norm_k(k)
-        k = k.view(b, -1, n, d)
-        v = self.v(context).view(b, -1, n, d)
-
-        # compute attention
-        v = v.contiguous().clone()
-        qvl_list=[q, k, v]
-        del q, k, v
-        x = pay_attention(qvl_list,  cross_attn= True)
-
-        # output
-        x = x.flatten(2)
+        x, _ = self.text_cross_attention( xlist, context)
         x = self.o(x)
         return x
 
@@ -295,30 +341,14 @@ class WanI2VCrossAttention(WanSelfAttention):
             context(Tensor): Shape [B, L2, C]
         """
 
-        ##### Enjoy this spagheti VRAM optimizations done by DeepBeepMeep !
-        # I am sure you are a nice person and as you copy this code, you will give me officially proper credits:
-        # Please link to https://github.com/deepbeepmeep/Wan2GP and @deepbeepmeep on twitter  
-
-        x = xlist[0]
-        xlist.clear()
 
         context_img = context[:, :257]
         context = context[:, 257:]
-        b, n, d = x.size(0), self.num_heads, self.head_dim
-
-        # compute query, key, value
-        q = self.q(x)
-        del x
-        self.norm_q(q)
-        q= q.view(b, -1, n, d)
-        k = self.k(context)
-        self.norm_k(k)
-        k = k.view(b, -1, n, d)
-        v = self.v(context).view(b, -1, n, d)
-
-        qkv_list = [q, k, v]
-        del k,v
-        x = pay_attention(qkv_list)
+        
+        x, q = self.text_cross_attention( xlist, context, return_q = True)
+        if len(q) != len(context_img):
+            context_img = context_img[:len(q)]
+        b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
         if audio_scale != None:
             audio_x = self.processor(q, audio_proj, grid_sizes[0], audio_context_lens)
@@ -329,12 +359,9 @@ class WanI2VCrossAttention(WanSelfAttention):
         qkv_list = [q, k_img, v_img]
         del q, k_img, v_img
         img_x = pay_attention(qkv_list)
-        # compute attention
-
+        img_x = img_x.flatten(2)
 
         # output
-        x = x.flatten(2)
-        img_x = img_x.flatten(2)
         x += img_x
         del img_x
         if audio_scale != None:
@@ -1187,11 +1214,18 @@ class WanModel(ModelMixin, ConfigMixin):
                 e0 = e0 + self.fps_projection(fps_emb).unflatten(1, (6, self.dim))
 
         # context
-        context = [self.text_embedding( torch.cat( [u, u.new_zeros(self.text_len - u.size(0), u.size(1))] ).unsqueeze(0) ) for u in context  ] 
+        context = [self.text_embedding( u ) for u in context  ] 
         
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context = [ torch.cat( [context_clip, u ], dim=1 ) for u in context  ] 
+            context_list = []
+            for one_context in context: 
+                if len(one_context) != len(context_clip):
+                    context_list.append( torch.cat( [context_clip.repeat(len(one_context), 1, 1), one_context ], dim=1 ))
+                else:
+                    context_list.append( torch.cat( [context_clip, one_context ], dim=1 ))
+        else:
+            context_list = context
 
         if multitalk_audio != None:
             multitalk_audio_list = []
@@ -1208,7 +1242,6 @@ class WanModel(ModelMixin, ConfigMixin):
         else:
             multitalk_masks_list = [None] * len(x_list)
 
-        context_list = context
         if audio_scale != None: 
             audio_scale_list = audio_scale
         else:

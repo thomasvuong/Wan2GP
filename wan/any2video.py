@@ -392,6 +392,9 @@ class WanAny2V:
         keep_frames_parsed = [],
         model_type = None,
         loras_slists = None,
+        NAG_scale = 0,
+        NAG_tau = 3.5,
+        NAG_alpha = 0.5,
         offloadobj = None,
         apg_switch = False,
         **bbargs
@@ -443,11 +446,21 @@ class WanAny2V:
         context_null = self.text_encoder([n_prompt], self.device)[0]
         context = context.to(self.dtype)
         context_null = context_null.to(self.dtype)
+        text_len = self.model.text_len
+        context = torch.cat([context, context.new_zeros(text_len -context.size(0), context.size(1)) ]).unsqueeze(0) 
+        context_null = torch.cat([context_null, context_null.new_zeros(text_len -context_null.size(0), context_null.size(1)) ]).unsqueeze(0) 
+        # NAG_prompt =  "static, low resolution, blurry"
+        # context_NAG = self.text_encoder([NAG_prompt], self.device)[0]
+        # context_NAG = context_NAG.to(self.dtype)
+        # context_NAG = torch.cat([context_NAG, context_NAG.new_zeros(text_len -context_NAG.size(0), context_NAG.size(1)) ]).unsqueeze(0) 
+        
         # from mmgp import offload
         # offloadobj.unload_all()
 
-        if self._interrupt:
-            return None
+        offload.shared_state.update({"_nag_scale" : NAG_scale, "_nag_tau" : NAG_tau, "_nag_alpha":  NAG_alpha })
+        if NAG_scale > 1: context = torch.cat([context, context_null], dim=0)
+        # if NAG_scale > 1: context = torch.cat([context, context_NAG], dim=0)
+        if self._interrupt: return None
 
         vace = model_type in ["vace_1.3B","vace_14B", "vace_multitalk_14B"]
         phantom = model_type in ["phantom_1.3B", "phantom_14B"]

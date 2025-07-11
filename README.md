@@ -23,6 +23,16 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 
 ## 🔥 Latest Updates
 
+### July 10 2025: WanGP v6.7, is NAG a game changer ? you tell me
+
+Maybe you knew that already but most _Loras accelerators_ we use today (Causvid, FusioniX) don't use _Guidance_ at all (that it is _CFG_ is set to 1). This helps to get much faster generations but the downside is that _Negative Prompts_ are completely ignored (including the default ones set by the models). **NAG** (https://github.com/ChenDarYen/Normalized-Attention-Guidance) aims to solve that by injecting the _Negative Prompt_ during the _attention_ processing phase.
+
+So WanGP 6.7 gives you NAG, but not any NAG, a _Low VRAM_ implementation, the default one ends being VRAM greedy. You will find NAG in the _General_ advanced tab for most Wan models.
+
+Use NAG especially when Guidance is set to 1. To turn it on set the **NAG scale** to something around 10. There are other NAG parameters **NAG tau** and **NAG alpha** which I recommend to change only if you don't get good results by just playing with the NAG scale. Don't hesitate to share on this discord server the best combinations for these 3 parameters.
+
+The authors of NAG claim that NAG can also be used when using a Guidance (CFG > 1) and to improve the prompt adherence.
+
 ### July 8 2025: WanGP v6.6, WanGP offers you **Vace Multitalk Dual Voices Fusionix Infinite** :
 
 **Vace** our beloved super Control Net has been combined with **Multitalk** the new king in town that can animate up to two people speaking (**Dual Voices**). It is accelerated by the **Fusionix** model and thanks to _Sliding Windows_ support and _Adaptive Projected Guidance_ (much slower but should reduce the reddish effect with long videos) your two people will be able to talk for very a long time (which is an **Infinite** amount of time in the field of video generation).
