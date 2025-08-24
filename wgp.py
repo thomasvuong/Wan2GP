@@ -4173,16 +4173,19 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
         enhancer_offloadobj = offload.profile(pipe, profile_no= profile, **kwargs)  
 
     original_image_refs = inputs["image_refs"]
+    if original_image_refs is not None:
+        original_image_refs = [ convert_image(tup[0]) for tup in original_image_refs ]        
     is_image = inputs["image_mode"] == 1
     seed = inputs["seed"]
     seed = set_seed(seed)
     enhanced_prompts = []
     for i, (one_prompt, one_image) in enumerate(zip(original_prompts, image_start)):
+        start_images = [one_image] if one_image is not None else None
         status = f'Please Wait While Enhancing Prompt' if num_prompts==1 else f'Please Wait While Enhancing Prompt #{i+1}'
         progress((i , num_prompts), desc=status, total= num_prompts)
 
         try:
-            enhanced_prompt = process_prompt_enhancer(prompt_enhancer, [one_prompt],  [one_image], original_image_refs, is_image, seed )    
+            enhanced_prompt = process_prompt_enhancer(prompt_enhancer, [one_prompt],  start_images, original_image_refs, is_image, seed )    
         except Exception as e:
             enhancer_offloadobj.unload_all()
             with gen_lock:
