@@ -11,7 +11,7 @@
 		"flux-model": "flux-dev-uso"		
     },
 	"prompt": "add a hat",
-	"guidance_scale": 4,
+	"embedded_guidance_scale": 4,
     "resolution": "1024x1024",
     "batch_size": 1
 }
