@@ -778,13 +778,11 @@ class WanAny2V:
             from preprocessing.face_preprocessor  import FaceProcessor 
             standin_ref_pos = 1 if "K" in video_prompt_type else 0
             if len(original_input_ref_images) < standin_ref_pos + 1: 
-                if "I" in video_prompt_type:
+                if "I" in video_prompt_type and model_type in ["vace_standin_14B"]:
                     print("Warning: Missing Standin ref image, make sure 'Inject only People / Objets' is selected or if there is 'Landscape and then People or Objects' there are at least two ref images.")
             else: 
                 standin_ref_pos = -1
                 image_ref = original_input_ref_images[standin_ref_pos]
-                image_ref.save("si.png")
-                # face_processor = FaceProcessor(antelopv2_path="ckpts/antelopev2")
                 face_processor = FaceProcessor()
                 standin_ref = face_processor.process(image_ref, remove_bg = model_type in ["vace_standin_14B"])
                 face_processor = None

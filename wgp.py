@@ -81,6 +81,7 @@ def clear_gen_cache():
 
 def release_model():
     global wan_model, offloadobj, reload_needed
+    wan_model = None    
     clear_gen_cache()
     offload.shared_state
     if offloadobj is not None:
