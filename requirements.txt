@@ -12,13 +12,13 @@ easydict
 ftfy
 dashscope
 imageio-ffmpeg
-# flash_attn    
-gradio==5.23.0   
+# flash_attn
+gradio==5.23.0
 numpy>=1.23.5,<2
 einops
 moviepy==1.0.3
 mmgp==3.5.1
-peft==0.15.0
+peft==0.17.0
 mutagen
 pydantic==2.10.6
 decord

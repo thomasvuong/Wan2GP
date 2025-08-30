@@ -114,6 +114,25 @@ map_gpu_to_profile() {
 
 # ───────────────────────── main ────────────────────────────
 
+echo "🔧 NVIDIA CUDA Setup Check:"
+
+# NVIDIA driver check
+if command -v nvidia-smi &>/dev/null; then
+    DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits | head -1)
+    echo "✅ NVIDIA Driver: $DRIVER_VERSION"
+    
+    # Quick CUDA 12.4 compatibility check
+    if [[ "$DRIVER_VERSION" =~ ^([0-9]+) ]]; then
+        MAJOR=${BASH_REMATCH[1]}
+        if [ "$MAJOR" -lt 520 ]; then
+            echo "⚠️  Driver $DRIVER_VERSION may not support CUDA 12.4 (need 520+)"
+        fi
+    fi
+else
+    echo "❌ nvidia-smi not found - no NVIDIA drivers"
+    exit 1
+fi
+
 GPU_NAME=$(detect_gpu_name)
 echo "🔍 Detected GPU: $GPU_NAME"
 
@@ -154,6 +173,14 @@ if ! docker info 2>/dev/null | grep -q 'Runtimes:.*nvidia'; then
     echo "✅ NVIDIA Docker runtime installed."
 else
     echo "✅ NVIDIA Docker runtime found."
+fi
+
+# Quick NVIDIA runtime test
+echo "🧪 Testing NVIDIA runtime..."
+if timeout 15s docker run --rm --gpus all --runtime=nvidia nvidia/cuda:12.4-runtime-ubuntu22.04 nvidia-smi >/dev/null 2>&1; then
+    echo "✅ NVIDIA runtime working"
+else
+    echo "❌ NVIDIA runtime test failed - check driver/runtime compatibility"
 fi
 
 # Prepare cache dirs & volume mounts
