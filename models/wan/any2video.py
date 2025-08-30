@@ -777,19 +777,22 @@ class WanAny2V:
         if standin:
             from preprocessing.face_preprocessor  import FaceProcessor 
             standin_ref_pos = 1 if "K" in video_prompt_type else 0
-            if len(original_input_ref_images) < standin_ref_pos + 1: raise Exception("Missing Standin ref image") 
-            standin_ref_pos = -1
-            image_ref = original_input_ref_images[standin_ref_pos]
-            image_ref.save("si.png")
-            # face_processor = FaceProcessor(antelopv2_path="ckpts/antelopev2")
-            face_processor = FaceProcessor()
-            standin_ref = face_processor.process(image_ref, remove_bg = model_type in ["vace_standin_14B"])
-            face_processor = None
-            gc.collect()
-            torch.cuda.empty_cache()
-            standin_freqs = get_nd_rotary_pos_embed((-1, int(target_shape[-2]/2), int(target_shape[-1]/2) ), (-1, int(target_shape[-2]/2 + standin_ref.height/16), int(target_shape[-1]/2 + standin_ref.width/16) )) 
-            standin_ref = self.vae.encode([ convert_image_to_tensor(standin_ref).unsqueeze(1) ], VAE_tile_size)[0].unsqueeze(0)
-            kwargs.update({ "standin_freqs": standin_freqs, "standin_ref": standin_ref, }) 
+            if len(original_input_ref_images) < standin_ref_pos + 1: 
+                if "I" in video_prompt_type:
+                    print("Warning: Missing Standin ref image, make sure 'Inject only People / Objets' is selected or if there is 'Landscape and then People or Objects' there are at least two ref images.")
+            else: 
+                standin_ref_pos = -1
+                image_ref = original_input_ref_images[standin_ref_pos]
+                image_ref.save("si.png")
+                # face_processor = FaceProcessor(antelopv2_path="ckpts/antelopev2")
+                face_processor = FaceProcessor()
+                standin_ref = face_processor.process(image_ref, remove_bg = model_type in ["vace_standin_14B"])
+                face_processor = None
+                gc.collect()
+                torch.cuda.empty_cache()
+                standin_freqs = get_nd_rotary_pos_embed((-1, int(target_shape[-2]/2), int(target_shape[-1]/2) ), (-1, int(target_shape[-2]/2 + standin_ref.height/16), int(target_shape[-1]/2 + standin_ref.width/16) )) 
+                standin_ref = self.vae.encode([ convert_image_to_tensor(standin_ref).unsqueeze(1) ], VAE_tile_size)[0].unsqueeze(0)
+                kwargs.update({ "standin_freqs": standin_freqs, "standin_ref": standin_ref, }) 
 
 
         # Steps Skipping
