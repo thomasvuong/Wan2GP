@@ -27,10 +27,10 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 
 - Unofficial **Video to Video (Non Sparse this time) for InfinitTalk**. Use the Strength Noise slider to decide how much motion of the original window you want to keep. I have also *greatly reduced the VRAM requirements for Multitalk / Infinitalk* (especially the multispeakers version & when generating at 1080p). 
 
-- **Experimental Sage 3 Attention support**: you will need to deserve this one, first you need a Blackwell GPU (RTX50xx), then you will have to compile Sage 3, install it and cross your fingers that there isn't any crash.
+- **Experimental Sage 3 Attention support**: you will need to deserve this one, first you need a Blackwell GPU (RTX50xx) and request an access to Sage 3 Github repo, then you will have to compile Sage 3, install it and cross your fingers ...
 
 
-*update 8.31: one shouldnt talk about bugs if one dont want to attract bugs*
+*update 8.31: one shouldnt talk about bugs if one doesn't want to attract bugs*
 
 ### August 29 2025: WanGP v8.21 -  Here Goes Your Weekend
 
