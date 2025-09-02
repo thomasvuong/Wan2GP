@@ -397,6 +397,7 @@ class AdvancedMediaGallery:
                 columns=self.columns,
                 show_label=self.show_label,
                 preview= True,
+                type="pil",
                 selected_index=self._initial_state["selected"],  # server-side selection
             )
 
