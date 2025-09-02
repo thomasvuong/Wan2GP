@@ -60,7 +60,7 @@ AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
 
 target_mmgp_version = "3.5.11"
-WanGP_version = "8.3"
+WanGP_version = "8.31"
 settings_version = 2.28
 max_source_video_frames = 3000
 prompt_enhancer_image_caption_model, prompt_enhancer_image_caption_processor, prompt_enhancer_llm_model, prompt_enhancer_llm_tokenizer = None, None, None, None
@@ -184,6 +184,17 @@ def is_integer(n):
 def compute_sliding_window_no(current_video_length, sliding_window_size, discard_last_frames, reuse_frames):
     left_after_first_window = current_video_length - sliding_window_size + discard_last_frames
     return 1 + math.ceil(left_after_first_window / (sliding_window_size - discard_last_frames - reuse_frames))
+
+
+def clean_image_list(gradio_list):
+    if not isinstance(gradio_list, list): gradio_list = [gradio_list]
+    gradio_list = [ tup[0] if isinstance(tup, tuple) else tup for tup in gradio_list ]        
+
+    if any( not isinstance(image, (Image.Image, str))  for image in gradio_list): return None
+    if any( isinstance(image, str) and not has_image_file_extension(image) for image in gradio_list): return None
+    gradio_list = [ convert_image( Image.open(img) if isinstance(img, str) else img  ) for img in gradio_list  ]        
+    return gradio_list
+
 
 
 def process_prompt_and_add_tasks(state, model_choice):
@@ -436,11 +447,10 @@ def process_prompt_and_add_tasks(state, model_choice):
         if image_refs == None or len(image_refs) == 0:
             gr.Info("You must provide at least one Refererence Image")
             return
-        if any(isinstance(image[0], str) for image in image_refs) :
+        image_refs = clean_image_list(image_refs)
+        if image_refs == None :
             gr.Info("A Reference Image should be an Image") 
             return
-        if isinstance(image_refs, list):
-            image_refs = [ convert_image(tup[0]) for tup in image_refs ]        
     else:
         image_refs = None
 
@@ -497,12 +507,10 @@ def process_prompt_and_add_tasks(state, model_choice):
         if image_start == None or isinstance(image_start, list) and len(image_start) == 0:
             gr.Info("You must provide a Start Image")
             return
-        if not isinstance(image_start, list):
-            image_start = [image_start]
-        if not all( not isinstance(img[0], str) for img in image_start) :
+        image_start = clean_image_list(image_start)        
+        if image_start == None :
             gr.Info("Start Image should be an Image") 
             return
-        image_start = [ convert_image(tup[0]) for tup in image_start ]
     else:
         image_start = None
 
@@ -510,15 +518,13 @@ def process_prompt_and_add_tasks(state, model_choice):
         if image_end == None or isinstance(image_end, list) and len(image_end) == 0:
             gr.Info("You must provide an End Image") 
             return
-        if not isinstance(image_end, list):
-            image_end = [image_end]
-        if not all( not isinstance(img[0], str) for img in image_end) :
+        image_end = clean_image_list(image_end)        
+        if image_end == None :
             gr.Info("End Image should be an Image") 
             return
         if len(image_start) != len(image_end):
             gr.Info("The number of Start and End Images should be the same ")
             return         
-        image_end = [ convert_image(tup[0]) for tup in image_end ]
     else:        
         image_end = None
 

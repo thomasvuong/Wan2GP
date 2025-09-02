@@ -224,7 +224,9 @@ class AdvancedMediaGallery:
         n = len(get_list(gallery))
         sel = idx if (idx is not None and 0 <= idx < n) else None
         st["selected"] = sel
-        return gr.update(selected_index=sel), st
+        # return gr.update(selected_index=sel), st
+        # return gr.update(), st
+        return st
 
     def _on_gallery_change(self, value: List[Any], state: Dict[str, Any]) :
         # Fires when users add/drag/drop/delete via the Gallery itself.
@@ -238,8 +240,10 @@ class AdvancedMediaGallery:
         else:
             new_sel = old_sel
         st["selected"] = new_sel
-        return gr.update(value=items_filtered, selected_index=new_sel), st
+        # return gr.update(value=items_filtered, selected_index=new_sel), st
+        # return gr.update(value=items_filtered), st
 
+        return gr.update(), st
 
     def _on_add(self, files_payload: Any, state: Dict[str, Any], gallery):
         """
@@ -338,7 +342,8 @@ class AdvancedMediaGallery:
             return gr.update(value=[], selected_index=None), st
         new_sel = min(sel, len(items) - 1)
         st["items"] = items; st["selected"] = new_sel
-        return gr.update(value=items, selected_index=new_sel), st
+        # return gr.update(value=items, selected_index=new_sel), st
+        return gr.update(value=items), st
 
     def _on_move(self, delta: int, state: Dict[str, Any], gallery) :
         st = get_state(state); items: List[Any] = get_list(gallery); sel = st.get("selected", None)
@@ -352,8 +357,8 @@ class AdvancedMediaGallery:
         return gr.update(value=items, selected_index=j), st
 
     def _on_clear(self, state: Dict[str, Any]) :
-        st = {"items": [], "selected": None, "single": state.get("single", False), "mode": self.media_mode}
-        return gr.update(value=[], selected_index=None), st
+        st = {"items": [], "selected": None, "single": get_state(state).get("single", False), "mode": self.media_mode}
+        return gr.update(value=[], selected_index=0), st
 
     def _on_toggle_single(self, to_single: bool, state: Dict[str, Any]) :
         st = get_state(state); st["single"] = bool(to_single)
@@ -397,7 +402,8 @@ class AdvancedMediaGallery:
                 columns=self.columns,
                 show_label=self.show_label,
                 preview= True,
-                type="pil",
+                # type="pil",
+                file_types= list(IMAGE_EXTS) if self.media_mode == "image" else list(VIDEO_EXTS), 
                 selected_index=self._initial_state["selected"],  # server-side selection
             )
 
@@ -424,7 +430,7 @@ class AdvancedMediaGallery:
         self.gallery.select(
             self._on_select,
             inputs=[self.state, self.gallery],
-            outputs=[self.gallery, self.state],
+            outputs=[self.state],
         )
 
         # Gallery value changed by user actions (click-to-add, drag-drop, internal remove, etc.)

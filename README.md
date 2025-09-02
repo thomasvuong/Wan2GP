@@ -20,7 +20,7 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 **Follow DeepBeepMeep on Twitter/X to get the Latest News**: https://x.com/deepbeepmeep
 
 ## 🔥 Latest Updates : 
-### September 2 2025: WanGP v8.3 - At last the pain stops
+### September 2 2025: WanGP v8.31 - At last the pain stops
 
 - This single new feature should give you the strength to face all the potential bugs of this new release:
 **Images Management (multiple additions or deletions, reordering) for Start Images / End Images / Images References.**  
@@ -30,6 +30,7 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 - **Experimental Sage 3 Attention support**: you will need to deserve this one, first you need a Blackwell GPU (RTX50xx), then you will have to compile Sage 3, install it and cross your fingers that there isn't any crash.
 
 
+*update 8.31: one shouldnt talk about bugs if one dont want to attract bugs*
 
 ### August 29 2025: WanGP v8.21 -  Here Goes Your Weekend
 
