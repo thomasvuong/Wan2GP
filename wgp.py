@@ -59,8 +59,8 @@ global_queue_ref = []
 AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
 
-target_mmgp_version = "3.5.11"
-WanGP_version = "8.31"
+target_mmgp_version = "3.5.12"
+WanGP_version = "8.32"
 settings_version = 2.28
 max_source_video_frames = 3000
 prompt_enhancer_image_caption_model, prompt_enhancer_image_caption_processor, prompt_enhancer_llm_model, prompt_enhancer_llm_tokenizer = None, None, None, None
@@ -1360,6 +1360,14 @@ def _parse_args():
         action="store_true",
         help="save proprocessed audio track with extract speakers for debugging or editing"
     )
+
+    parser.add_argument(
+        "--vram-safety-coefficient",
+        type=float,
+        default=0.8,
+        help="max VRAM (between 0 and 1) that should be allocated to preloaded models"
+    )
+
 
     parser.add_argument(
         "--share",
@@ -2767,6 +2775,7 @@ def load_models(model_type, override_profile = -1):
         transformer_dtype = torch.bfloat16 if "bf16" in model_filename or "BF16" in model_filename else transformer_dtype
         transformer_dtype = torch.float16 if "fp16" in model_filename or"FP16" in model_filename else transformer_dtype
     perc_reserved_mem_max = args.perc_reserved_mem_max
+    vram_safety_coefficient = args.vram_safety_coefficient 
     model_file_list = [model_filename]
     model_type_list = [model_type]
     module_type_list = [None]
@@ -2803,7 +2812,7 @@ def load_models(model_type, override_profile = -1):
     loras_transformer = ["transformer"]
     if "transformer2" in pipe:
         loras_transformer += ["transformer2"]        
-    offloadobj = offload.profile(pipe, profile_no= profile, compile = compile, quantizeTransformer = False, loras = loras_transformer, coTenantsMap= {}, perc_reserved_mem_max = perc_reserved_mem_max , convertWeightsFloatTo = transformer_dtype, **kwargs)  
+    offloadobj = offload.profile(pipe, profile_no= profile, compile = compile, quantizeTransformer = False, loras = loras_transformer, coTenantsMap= {}, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, **kwargs)  
     if len(args.gpu) > 0:
         torch.set_default_device(args.gpu)
     transformer_type = model_type
@@ -4164,6 +4173,7 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
         download_models()
 
     gen = get_gen_info(state)
+    original_process_status = None
     while True:
         with gen_lock:
             process_status = gen.get("process_status", None)
@@ -6116,8 +6126,7 @@ def has_video_file_extension(filename):
 
 def has_image_file_extension(filename):
     extension = os.path.splitext(filename)[-1]
-    return extension in [".jpeg", ".jpg", ".png", ".webp", ".bmp", ".tiff"]
-
+    return extension in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg"]
 def add_videos_to_gallery(state, input_file_list, choice, files_to_load):
     gen = get_gen_info(state)
     if files_to_load == None:
@@ -7016,10 +7025,10 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             any_reference_image = False
             v2i_switch_supported = (vace or t2v or standin) and not image_outputs
             ti2v_2_2 = base_model_type in ["ti2v_2_2"]
-
+            gallery_height = 350
             def get_image_gallery(label ="", value = None, single_image_mode = False, visible = False ):
                 with gr.Row(visible = visible) as gallery_row:
-                    gallery_amg = AdvancedMediaGallery(media_mode="image", height=None, columns=4, label=label, initial = value , single_image_mode = single_image_mode )
+                    gallery_amg = AdvancedMediaGallery(media_mode="image", height=gallery_height, columns=4, label=label, initial = value , single_image_mode = single_image_mode )
                     gallery_amg.mount(update_form=update_form)
                 return gallery_row, gallery_amg.gallery, [gallery_row] + gallery_amg.get_toggable_elements()
 
@@ -7044,7 +7053,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
                     image_start_row, image_start, image_start_extra = get_image_gallery(visible = False )
                     image_end_row, image_end, image_end_extra = get_image_gallery(visible = False )
-                    video_source = gr.Video(label= "Video Source", visible = "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None))
+                    video_source = gr.Video(label= "Video Source", height = gallery_height, visible = "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None))
                     model_mode = gr.Dropdown(visible = False)
                     keep_frames_video_source = gr.Text(value=ui_defaults.get("keep_frames_video_source","") , visible= len(filter_letters(image_prompt_type_value, "VLG"))>0 , scale = 2, label= "Truncate Video beyond this number of resampled Frames (empty=Keep All, negative truncates from End)" ) 
                     any_video_source = True
@@ -7062,7 +7071,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
                     image_start_row, image_start, image_start_extra = get_image_gallery(label= "Images as starting points for new videos", value = ui_defaults.get("image_start", None), visible= "S" in image_prompt_type_value )
                     image_end_row, image_end, image_end_extra = get_image_gallery(label= "Images as ending points for new videos", value = ui_defaults.get("image_end", None), visible= "E" in image_prompt_type_value ) 
-                    video_source = gr.Video(label= "Video to Continue", visible= "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None),)
+                    video_source = gr.Video(label= "Video to Continue", height = gallery_height, visible= "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None),)
                     if not diffusion_forcing:
                         model_mode = gr.Dropdown(
                             choices=[
@@ -7084,7 +7093,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                     image_prompt_type = gr.Radio(choices=[("Source Video", "V")], value="V")
                     image_start_row, image_start, image_start_extra = get_image_gallery(visible = False )
                     image_end_row, image_end, image_end_extra = get_image_gallery(visible = False )
-                    video_source = gr.Video(label= "Video Source", visible = True, value= ui_defaults.get("video_source", None),)
+                    video_source = gr.Video(label= "Video Source", height = gallery_height, visible = True, value= ui_defaults.get("video_source", None),)
                     model_mode = gr.Dropdown(
                         choices=[
                             ("Pan Right", 1),
@@ -7121,7 +7130,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         if hunyuan_i2v:
                             video_source = gr.Video(value=None, visible=False)
                         else:
-                            video_source = gr.Video(label= "Video to Continue", visible= "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None),)
+                            video_source = gr.Video(label= "Video to Continue", height = gallery_height, visible= "V" in image_prompt_type_value, value= ui_defaults.get("video_source", None),)
                     else:
                         image_prompt_type = gr.Radio(choices=[("", "")], value="")
                         image_start_row, image_start, image_start_extra = get_image_gallery(visible = False )
@@ -7311,8 +7320,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             visible = False,
                             label="Start / Reference Images", scale = 2
                         )
-                image_guide = gr.Image(label= "Control Image", type ="pil", visible= image_outputs and "V" in video_prompt_type_value, value= ui_defaults.get("image_guide", None))
-                video_guide = gr.Video(label= "Control Video", visible= (not image_outputs) and "V" in video_prompt_type_value, value= ui_defaults.get("video_guide", None))
+                image_guide = gr.Image(label= "Control Image", height = gallery_height, type ="pil", visible= image_outputs and "V" in video_prompt_type_value, value= ui_defaults.get("image_guide", None))
+                video_guide = gr.Video(label= "Control Video", height = gallery_height, visible= (not image_outputs) and "V" in video_prompt_type_value, value= ui_defaults.get("video_guide", None))
 
                 denoising_strength = gr.Slider(0, 1, value= ui_defaults.get("denoising_strength" ,0.5), step=0.01, label="Denoising Strength (the Lower the Closer to the Control Video)", visible = "G" in video_prompt_type_value, show_reset_button= False)
                 keep_frames_video_guide_visible = not image_outputs and  "V" in video_prompt_type_value and not model_def.get("keep_frames_video_guide_not_supported", False)
@@ -7331,8 +7340,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             video_guide_outpainting_left = gr.Slider(0, 100, value= video_guide_outpainting_list[2], step=5, label="Left %", show_reset_button= False)
                             video_guide_outpainting_right = gr.Slider(0, 100, value= video_guide_outpainting_list[3], step=5, label="Right %", show_reset_button= False)
                 any_image_mask = image_outputs and vace
-                image_mask = gr.Image(label= "Image Mask Area (for Inpainting, white = Control Area, black = Unchanged)", type ="pil", visible= image_outputs and "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value , value= ui_defaults.get("image_mask", None)) 
-                video_mask = gr.Video(label= "Video Mask Area (for Inpainting, white = Control Area, black = Unchanged)", visible= (not image_outputs) and "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value , value= ui_defaults.get("video_mask", None)) 
+                image_mask = gr.Image(label= "Image Mask Area (for Inpainting, white = Control Area, black = Unchanged)", type ="pil", visible= image_outputs and "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value , height = gallery_height, value= ui_defaults.get("image_mask", None)) 
+                video_mask = gr.Video(label= "Video Mask Area (for Inpainting, white = Control Area, black = Unchanged)", visible= (not image_outputs) and "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value , height = gallery_height, value= ui_defaults.get("video_mask", None)) 
 
                 mask_expand = gr.Slider(-10, 50, value=ui_defaults.get("mask_expand", 0), step=1, label="Expand / Shrink Mask Area", visible= "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value )
                 any_reference_image = vace or phantom or hunyuan_video_custom or hunyuan_video_avatar or infinitetalk or (flux or qwen) and model_reference_image
