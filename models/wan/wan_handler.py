@@ -144,7 +144,9 @@ class family_handler():
         if vace_class or base_model_type in ["infinitetalk"]:
             image_prompt_types_allowed = "TVL"
         elif base_model_type in ["ti2v_2_2"]:
-            image_prompt_types_allowed = "TSEV"
+            image_prompt_types_allowed = "TSVL"
+        elif test_multitalk(base_model_type) or base_model_type in ["fantasy"]:
+            image_prompt_types_allowed = "SVL"
         elif i2v:
             image_prompt_types_allowed = "SEVL"
         else:
