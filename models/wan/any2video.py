@@ -537,7 +537,6 @@ class WanAny2V:
                         image_ref = input_frames[:, 0]
                         if input_video is None: input_video = input_frames[:, 0:1]
                         new_shot = "Q" in video_prompt_type
-                        denoising_strength = 0.5
                     else:
                         if pre_video_frame is None:
                             new_shot = True
