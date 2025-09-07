@@ -280,8 +280,15 @@ def edit_task_in_queue(
             mode,
             state,
 ):
-    inputs = get_function_arguments(edit_task_in_queue, locals())
-    
+    new_inputs = get_function_arguments(edit_task_in_queue, locals())
+    new_inputs.pop('lset_name', None)
+
+    if 'loras_choices' in new_inputs:
+        all_loras = state.get("loras", [])
+        lora_indices = new_inputs.pop('loras_choices')
+        activated_lora_filenames = [Path(all_loras[int(index)]).name for index in lora_indices]
+        new_inputs['activated_loras'] = activated_lora_filenames
+
     gen = get_gen_info(state)
     queue = gen.get("queue", [])
     editing_task_index = state.get("editing_task_index", None)
@@ -296,12 +303,36 @@ def edit_task_in_queue(
         return update_queue_data(queue), gr.Tabs(selected="video_gen")
 
     task_to_edit = queue[task_to_edit_index]
-    inputs['state'] = state 
-    task_to_edit['params'] = inputs.copy()
-    task_to_edit['prompt'] = inputs.get('prompt')
-    task_to_edit['length'] = inputs.get('video_length')
-    task_to_edit['steps'] = inputs.get('num_inference_steps') 
-    update_task_thumbnails(task_to_edit, inputs)   
+    original_params = task_to_edit['params'].copy()
+    media_keys = [
+        "image_start", "image_end", "image_refs", "video_source", 
+        "video_guide", "image_guide", "video_mask", "image_mask",
+        "audio_guide", "audio_guide2", "audio_source"
+    ]
+
+    multi_image_keys = ["image_refs"]
+    single_image_keys = ["image_start", "image_end"]
+
+    for key, new_value in new_inputs.items():
+        if key in media_keys:
+            if new_value is not None:
+                if key in multi_image_keys:
+                    cleaned_value = clean_image_list(new_value)
+                    original_params[key] = cleaned_value
+                elif key in single_image_keys:
+                    cleaned_list = clean_image_list(new_value)
+                    original_params[key] = cleaned_list[0] if cleaned_list else None
+                else:
+                    original_params[key] = new_value
+        else:
+            original_params[key] = new_value
+            
+    task_to_edit['params'] = original_params
+    task_to_edit['prompt'] = new_inputs.get('prompt')
+    task_to_edit['length'] = new_inputs.get('video_length')
+    task_to_edit['steps'] = new_inputs.get('num_inference_steps') 
+    update_task_thumbnails(task_to_edit, original_params)   
+    
     gr.Info(f"Task ID {task_to_edit['id']} has been updated successfully.")
     state["editing_task_index"] = None
     return update_queue_data(queue), gr.Tabs(selected="video_gen")
