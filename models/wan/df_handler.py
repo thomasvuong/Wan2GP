@@ -35,7 +35,7 @@ class family_handler():
                     "label" : "Generation Type"
         }
 
-        extra_model_def["image_prompt_types_allowed"] = "TSEV"
+        extra_model_def["image_prompt_types_allowed"] = "TSV"
 
 
         return extra_model_def 
