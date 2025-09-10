@@ -685,6 +685,7 @@ class QwenImagePipeline(): #DiffusionPipeline
         device = "cuda"
 
         prompt_image = None
+        image_mask_latents = None
         if image is not None and not (isinstance(image, torch.Tensor) and image.size(1) == self.latent_channels):
             image = image[0] if isinstance(image, list) else image
             image_height, image_width = self.image_processor.get_default_height_width(image)
@@ -703,7 +704,6 @@ class QwenImagePipeline(): #DiffusionPipeline
                     image_height, image_width = calculate_new_dimensions(ref_height, ref_width, image_height, image_width, False, block_size=multiple_of)
                 if (image_width,image_height) != image.size:
                     image = image.resize((image_width,image_height), resample=Image.Resampling.LANCZOS) 
-                image_mask_latents = None
             else:
                 # _, image_width, image_height = min(
                 #     (abs(aspect_ratio - w / h), w, h) for w, h in PREFERRED_QWENIMAGE_RESOLUTIONS

@@ -544,7 +544,7 @@ class WanAny2V:
                     else:
                         if input_ref_images is None:                        
                             if pre_video_frame is None: raise Exception("Missing Reference Image")
-                            input_ref_images = [pre_video_frame]
+                            input_ref_images, new_shot = [pre_video_frame], False
                         new_shot = new_shot and window_no <= len(input_ref_images)
                         image_ref = convert_image_to_tensor(input_ref_images[ min(window_no, len(input_ref_images))-1 ])
                     if new_shot or input_video is None:  

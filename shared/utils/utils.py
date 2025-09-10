@@ -189,6 +189,14 @@ def get_outpainting_full_area_dimensions(frame_height,frame_width, outpainting_d
     frame_width =  int(frame_width * (100 + outpainting_left + outpainting_right) / 100)
     return frame_height, frame_width  
 
+def rgb_bw_to_rgba_mask(img, thresh=127):
+    a = img.convert('L').point(lambda p: 255 if p > thresh else 0)  # alpha
+    out = Image.new('RGBA', img.size, (255, 255, 255, 0))           # white, transparent
+    out.putalpha(a)                                                 # white where alpha=255
+    return out
+                        
+
+
 def  get_outpainting_frame_location(final_height, final_width,  outpainting_dims, block_size = 8):
     outpainting_top, outpainting_bottom, outpainting_left, outpainting_right= outpainting_dims
     raw_height = int(final_height / ((100 + outpainting_top + outpainting_bottom) / 100))

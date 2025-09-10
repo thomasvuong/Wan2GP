@@ -53,7 +53,7 @@ class family_handler():
 
         if base_model_type in ["hunyuan_custom_edit"]:
             extra_model_def["guide_preprocessing"] = {
-                "selection": ["MV", "PMV"],
+                "selection": ["MV", "PV"],
             }
 
             extra_model_def["mask_preprocessing"] = {
@@ -160,6 +160,14 @@ class family_handler():
 
     @staticmethod
     def fix_settings(base_model_type, settings_version, model_def, ui_defaults):
+        if settings_version<2.33:
+            if base_model_type in ["hunyuan_custom_edit"]:
+                video_prompt_type=  ui_defaults["video_prompt_type"]
+                if "P" in video_prompt_type and "M" in video_prompt_type: 
+                    video_prompt_type = video_prompt_type.replace("M","")
+                    ui_defaults["video_prompt_type"] = video_prompt_type  
+
+        
         pass
     
     @staticmethod

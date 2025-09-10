@@ -764,6 +764,19 @@ def display(tabs, tab_state, state, refresh_form_trigger, server_config, get_cur
 
     media_url = "https://github.com/pq-yang/MatAnyone/releases/download/media/"
 
+    click_brush_js = """
+    () => {
+        setTimeout(() => {
+            const brushButton = document.querySelector('button[aria-label="Brush"]');
+            if (brushButton) {
+                brushButton.click();
+                console.log('Brush button clicked');
+            } else {
+                console.log('Brush button not found');
+            }
+        }, 1000);
+    }    """
+
     # download assets
 
     gr.Markdown("<B>Mast Edition is provided by MatAnyone and VRAM optimized by DeepBeepMeep</B>")
@@ -1101,7 +1114,7 @@ def display(tabs, tab_state, state, refresh_form_trigger, server_config, get_cur
                 export_image_btn.click(  fn=export_image, inputs= [state, foreground_image_output], outputs= [refresh_form_trigger]).then( #video_prompt_video_guide_trigger, 
                     fn=teleport_to_video_tab, inputs= [tab_state], outputs= [tabs])
                 export_image_mask_btn.click(  fn=export_image_mask, inputs= [state, image_input, alpha_image_output], outputs= [refresh_form_trigger]).then( #video_prompt_video_guide_trigger, 
-                    fn=teleport_to_video_tab, inputs= [tab_state], outputs= [tabs])
+                    fn=teleport_to_video_tab, inputs= [tab_state], outputs= [tabs]).then(fn=None, inputs=None, outputs=None, js=click_brush_js)
 
                 # first step: get the image information 
                 extract_frames_button.click(
