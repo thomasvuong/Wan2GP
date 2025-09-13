@@ -196,6 +196,11 @@ def clean_image_list(gradio_list):
     gradio_list = [ convert_image( Image.open(img) if isinstance(img, str) else img  ) for img in gradio_list  ]        
     return gradio_list
 
+def cancel_edit(state):
+    state["editing_task_index"] = None
+    gr.Info("Edit cancelled.")
+    return gr.Tabs(selected="video_gen")
+
 def edit_task_in_queue(
             lset_name,
             image_mode,
@@ -8215,12 +8220,10 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             if not update_form:
                 if tab_id == 'edit':
                     edit_btn = gr.Button("Edit")
-                    generate_btn = gr.Button("Generate", visible=False)
-                    add_to_queue_btn = gr.Button("Add New Prompt To Queue", visible=False)
+                    cancel_btn = gr.Button("Cancel")
                 else:
                     generate_btn = gr.Button("Generate")
                     add_to_queue_btn = gr.Button("Add New Prompt To Queue", visible=False)
-                    edit_btn = gr.Button("Save Edit", visible=False)
                 generate_trigger = gr.Text(visible = False) 
                 add_to_queue_trigger = gr.Text(visible = False)
 
@@ -8338,11 +8341,12 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
             status_trigger.change(refresh_status_async, inputs= [state] , outputs= [gen_status], show_progress_on= [gen_status])
 
-            output_trigger.change(refresh_gallery,
-                inputs = [state], 
-                outputs = [output, gen_info, generate_btn, add_to_queue_btn, current_gen_column, current_gen_buttons_row, queue_df, abort_btn, onemorewindow_btn],
-                show_progress="hidden"
-                )
+            if tab_id == 'generate':
+                output_trigger.change(refresh_gallery,
+                    inputs = [state], 
+                    outputs = [output, gen_info, generate_btn, add_to_queue_btn, current_gen_column, current_gen_buttons_row, queue_df, abort_btn, onemorewindow_btn],
+                    show_progress="hidden"
+                    )
 
 
             preview_column_no.input(show_preview_column_modal, inputs=[state, preview_column_no], outputs=[preview_column_no, modal_image_display, modal_container])
@@ -8466,6 +8470,11 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                     inputs=edit_inputs_components + [state],
                     outputs=[queue_df, main_tabs]
                 )
+                cancel_btn.click(
+                    fn=cancel_edit,
+                    inputs=[state],
+                    outputs=[main_tabs]
+                )
 
             refresh_form_trigger.change(fn= fill_inputs, 
                 inputs=[state],
@@ -8522,74 +8531,74 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                     inputs = [state],
                 )
 
-            generate_trigger.change(fn=validate_wizard_prompt,
-                inputs= [state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] ,
-                outputs= [prompt],
-                show_progress="hidden",
-            ).then(fn=save_inputs,
-                inputs =[target_state] + gen_inputs,
-                outputs= None
-            ).then(fn=process_prompt_and_add_tasks,
-                inputs = [state, model_choice],
-                outputs= queue_df,
-                show_progress="hidden",
-            ).then(fn=prepare_generate_video,
-                inputs= [state],
-                outputs= [generate_btn, add_to_queue_btn, current_gen_column, current_gen_buttons_row]
-            ).then(fn=activate_status,
-                inputs= [state],
-                outputs= [status_trigger],             
-            ).then(
-                fn=lambda s: gr.Accordion(open=True) if len(get_gen_info(s).get("queue", [])) > 1 else gr.update(),
-                inputs=[state],
-                outputs=[queue_accordion],
-                show_progress="hidden",
-            ).then(fn=process_tasks,
-                inputs= [state],
-                outputs= [preview_trigger, output_trigger], 
-                show_progress="hidden",
-            ).then(finalize_generation,
-                inputs= [state], 
-                outputs= [output, abort_btn, generate_btn, add_to_queue_btn, current_gen_column, gen_info]
-            ).then(
-                fn=lambda s: gr.Accordion(open=False) if len(get_gen_info(s).get("queue", [])) <= 1 else gr.update(),
-                inputs=[state],
-                outputs=[queue_accordion]
-            ).then(unload_model_if_needed,
-                inputs= [state], 
-                outputs= []
-            )
+                generate_trigger.change(fn=validate_wizard_prompt,
+                    inputs= [state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] ,
+                    outputs= [prompt],
+                    show_progress="hidden",
+                ).then(fn=save_inputs,
+                    inputs =[target_state] + gen_inputs,
+                    outputs= None
+                ).then(fn=process_prompt_and_add_tasks,
+                    inputs = [state, model_choice],
+                    outputs= queue_df,
+                    show_progress="hidden",
+                ).then(fn=prepare_generate_video,
+                    inputs= [state],
+                    outputs= [generate_btn, add_to_queue_btn, current_gen_column, current_gen_buttons_row]
+                ).then(fn=activate_status,
+                    inputs= [state],
+                    outputs= [status_trigger],             
+                ).then(
+                    fn=lambda s: gr.Accordion(open=True) if len(get_gen_info(s).get("queue", [])) > 1 else gr.update(),
+                    inputs=[state],
+                    outputs=[queue_accordion],
+                    show_progress="hidden",
+                ).then(fn=process_tasks,
+                    inputs= [state],
+                    outputs= [preview_trigger, output_trigger], 
+                    show_progress="hidden",
+                ).then(finalize_generation,
+                    inputs= [state], 
+                    outputs= [output, abort_btn, generate_btn, add_to_queue_btn, current_gen_column, gen_info]
+                ).then(
+                    fn=lambda s: gr.Accordion(open=False) if len(get_gen_info(s).get("queue", [])) <= 1 else gr.update(),
+                    inputs=[state],
+                    outputs=[queue_accordion]
+                ).then(unload_model_if_needed,
+                    inputs= [state], 
+                    outputs= []
+                )
 
-            gr.on(triggers=[load_queue_btn.upload, main.load],
-                fn=load_queue_action,
-                inputs=[load_queue_btn, state],
-                outputs=[queue_df]
-            ).then(
-                 fn=lambda s: (gr.update(visible=bool(get_gen_info(s).get("queue",[]))), gr.Accordion(open=True)) if bool(get_gen_info(s).get("queue",[])) else (gr.update(visible=False), gr.update()),
-                 inputs=[state],
-                 outputs=[current_gen_column, queue_accordion]
-            ).then(
-                fn=init_process_queue_if_any,
-                inputs=[state],
-                outputs=[generate_btn, add_to_queue_btn, current_gen_column, ]
-            ).then(fn=activate_status,
-                inputs= [state],
-                outputs= [status_trigger],             
-            ).then(
-                fn=process_tasks,
-                inputs=[state],
-                outputs=[preview_trigger, output_trigger],
-                trigger_mode="once"
-            ).then(
-                fn=finalize_generation_with_state,
-                inputs=[state],
-                outputs=[output, abort_btn, generate_btn, add_to_queue_btn, current_gen_column, gen_info, queue_accordion, state],
-                trigger_mode="always_last"
-            ).then(
-                unload_model_if_needed,
-                 inputs= [state],
-                 outputs= []
-            )
+                gr.on(triggers=[load_queue_btn.upload, main.load],
+                    fn=load_queue_action,
+                    inputs=[load_queue_btn, state],
+                    outputs=[queue_df]
+                ).then(
+                     fn=lambda s: (gr.update(visible=bool(get_gen_info(s).get("queue",[]))), gr.Accordion(open=True)) if bool(get_gen_info(s).get("queue",[])) else (gr.update(visible=False), gr.update()),
+                     inputs=[state],
+                     outputs=[current_gen_column, queue_accordion]
+                ).then(
+                    fn=init_process_queue_if_any,
+                    inputs=[state],
+                    outputs=[generate_btn, add_to_queue_btn, current_gen_column, ]
+                ).then(fn=activate_status,
+                    inputs= [state],
+                    outputs= [status_trigger],             
+                ).then(
+                    fn=process_tasks,
+                    inputs=[state],
+                    outputs=[preview_trigger, output_trigger],
+                    trigger_mode="once"
+                ).then(
+                    fn=finalize_generation_with_state,
+                    inputs=[state],
+                    outputs=[output, abort_btn, generate_btn, add_to_queue_btn, current_gen_column, gen_info, queue_accordion, state],
+                    trigger_mode="always_last"
+                ).then(
+                    unload_model_if_needed,
+                     inputs= [state],
+                     outputs= []
+                )
 
 
 
