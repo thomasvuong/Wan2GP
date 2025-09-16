@@ -356,7 +356,7 @@ def process_prompt_and_add_tasks(state, model_choice):
 
     outpainting_dims = get_outpainting_dims(video_guide_outpainting)
 
-    if server_config.get("fit_canvas", 0) == 2 and outpainting_dims is not None:
+    if server_config.get("fit_canvas", 0) == 2 and outpainting_dims is not None and any_letters(video_prompt_type, "VKF"):
         gr.Info("Output Resolution Cropping will be not used for this Generation as it is not compatible with Video Outpainting")
 
     if len(loras_multipliers) > 0:
