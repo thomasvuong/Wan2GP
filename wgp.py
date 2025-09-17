@@ -5739,6 +5739,22 @@ def process_tasks(state):
         send_cmd = com_stream.output_queue.push
         def generate_video_error_handler():
             try:
+                import inspect
+                model_type = params.get('model_type')
+                known_defaults = {
+                    'image_refs_relative_size': 50,
+                }
+
+                for arg_name, default_value in known_defaults.items():
+                    if arg_name not in params:
+                        print(f"Warning: Missing argument '{arg_name}' in loaded task. Applying default value: {default_value}")
+                        params[arg_name] = default_value
+                if model_type:
+                    default_settings = get_default_settings(model_type)
+                    expected_args = inspect.signature(generate_video).parameters.keys()
+                    for arg_name in expected_args:
+                        if arg_name not in params and arg_name in default_settings:
+                            params[arg_name] = default_settings[arg_name]
                 generate_video(task, send_cmd,  **params)
             except Exception as e:
                 tb = traceback.format_exc().split('\n')[:-1] 
