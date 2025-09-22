@@ -394,7 +394,7 @@ def process_prompt_and_add_tasks(state, model_choice):
         gr.Info("MMAudio can generate an Audio track only if the Video is at least 1s long")
     if "F" in video_prompt_type:
         if len(frames_positions.strip()) > 0:
-            positions = frames_positions.split(" ")
+            positions = frames_positions.replace(","," ").split(" ")
             for pos_str in positions:
                 if not pos_str in ["L", "l"] and len(pos_str)>0: 
                     if not is_integer(pos_str):
@@ -2528,7 +2528,7 @@ def download_models(model_filename = None, model_type= None, module_type = False
 
 
     from urllib.request import urlretrieve
-    from shared.utils.utils import create_progress_hook
+    from shared.utils.download import create_progress_hook
 
     shared_def = {
         "repoId" : "DeepBeepMeep/Wan2.1",
@@ -3726,6 +3726,60 @@ def preprocess_image_with_mask(input_image, input_mask, height, width, fit_canva
             input_mask = convert_tensor_to_image(full_frame) 
 
     return input_image, input_mask
+def extract_faces_from_video_with_mask(input_video_path, input_mask_path, max_frames, start_frame, target_fps, size = 512):
+    if not input_video_path or max_frames <= 0:
+        return None, None
+    pad_frames = 0
+    if start_frame < 0:
+        pad_frames= -start_frame
+        max_frames += start_frame
+        start_frame = 0
+
+    any_mask = input_mask_path != None
+    video = get_resampled_video(input_video_path, start_frame, max_frames, target_fps)
+    if len(video) == 0: return None
+    if any_mask:
+        mask_video = get_resampled_video(input_mask_path, start_frame, max_frames, target_fps)
+    frame_height, frame_width, _ = video[0].shape
+
+    num_frames = min(len(video), len(mask_video))
+    if num_frames == 0: return None
+    video, mask_video = video[:num_frames], mask_video[:num_frames]
+
+    from preprocessing.face_preprocessor  import FaceProcessor 
+    face_processor = FaceProcessor()
+
+    face_list = []
+    for frame_idx in range(num_frames):
+        frame = video[frame_idx].cpu().numpy() 
+        # video[frame_idx] = None
+        if any_mask:
+            mask = Image.fromarray(mask_video[frame_idx].cpu().numpy()) 
+            # mask_video[frame_idx] = None
+            if (frame_width, frame_height) != mask.size:
+                mask = mask.resize((frame_width, frame_height), resample=Image.Resampling.LANCZOS)
+            mask = np.array(mask)
+            alpha_mask = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+            alpha_mask[mask > 127] = 1
+            frame = frame * alpha_mask
+        frame = Image.fromarray(frame)
+        face = face_processor.process(frame, resize_to=size, face_crop_scale = 1)
+        face_list.append(face)
+
+    face_processor = None
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    face_tensor= torch.tensor(np.stack(face_list, dtype= np.float32) / 127.5 - 1).permute(-1, 0, 1, 2 ) # t h w c -> c t h w
+    if pad_frames > 0:
+        face_tensor= torch.cat([face_tensor[:, -1:].expand(-1, pad_frames, -1, -1), face_tensor ], dim=2)
+        
+    if args.save_masks:
+        from preprocessing.dwpose.pose import save_one_video
+        saved_faces_frames = [np.array(face) for face in face_list ]
+        save_one_video(f"faces.mp4", saved_faces_frames, fps=target_fps, quality=8, macro_block_size=None)
+    return face_tensor
+
 
 def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,  max_frames, start_frame=0, fit_canvas = None, fit_crop = False, target_fps = 16, block_size= 16, expand_scale = 2, process_type = "inpaint", process_type2 = None, to_bbox = False, RGB_Mask = False, negate_mask = False, process_outside_mask = None, inpaint_color = 127, outpainting_dims = None, proc_no = 1):
 
@@ -3742,7 +3796,13 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
         box = [xmin, ymin, xmax, ymax]
         box = [int(x) for x in box]
         return box
-    
+    inpaint_color = int(inpaint_color)
+    pad_frames = 0
+    if start_frame < 0:
+        pad_frames= -start_frame
+        max_frames += start_frame
+        start_frame = 0
+
     if not input_video_path or max_frames <= 0:
         return None, None
     any_mask = input_mask_path != None
@@ -3909,6 +3969,9 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
     preproc_outside = None
     gc.collect()
     torch.cuda.empty_cache()
+    if pad_frames > 0:
+        masked_frames = masked_frames[0] * pad_frames + masked_frames
+        if any_mask: masked_frames = masks[0] * pad_frames + masks
 
     return torch.stack(masked_frames), torch.stack(masks) if any_mask else None
 
@@ -4646,7 +4709,8 @@ def generate_video(
     current_video_length = video_length
     # VAE Tiling
     device_mem_capacity = torch.cuda.get_device_properties(None).total_memory / 1048576
-
+    guide_inpaint_color = model_def.get("guide_inpaint_color", 127.5)
+    extract_guide_from_window_start = model_def.get("extract_guide_from_window_start", False) 
     i2v = test_class_i2v(model_type)
     diffusion_forcing = "diffusion_forcing" in model_filename
     t2v = base_model_type in ["t2v"]
@@ -4662,6 +4726,7 @@ def generate_video(
     multitalk = model_def.get("multitalk_class", False)
     standin = model_def.get("standin_class", False)
     infinitetalk = base_model_type in ["infinitetalk"]
+    animate =  base_model_type in ["animate"]
 
     if "B" in audio_prompt_type or "X" in audio_prompt_type:
         from models.wan.multitalk.multitalk import parse_speakers_locations
@@ -4822,7 +4887,6 @@ def generate_video(
     repeat_no = 0
     extra_generation = 0
     initial_total_windows = 0
-
     discard_last_frames = sliding_window_discard_last_frames
     default_requested_frames_to_generate = current_video_length
     if sliding_window:
@@ -4843,7 +4907,7 @@ def generate_video(
         if repeat_no >= total_generation: break
         repeat_no +=1
         gen["repeat_no"] = repeat_no
-        src_video = src_mask = src_ref_images = new_image_guide = new_image_mask  = None
+        src_video = src_mask = src_ref_images = new_image_guide = new_image_mask  = src_faces = None
         prefix_video = pre_video_frame = None
         source_video_overlap_frames_count = 0 # number of frames overalapped in source video for first window
         source_video_frames_count = 0  # number of frames to use in source video (processing starts source_video_overlap_frames_count frames before )
@@ -4899,7 +4963,7 @@ def generate_video(
                 return_latent_slice = slice(-(reuse_frames - 1 + discard_last_frames ) // latent_size - 1, None if discard_last_frames == 0 else -(discard_last_frames // latent_size) )
             refresh_preview  = {"image_guide" : image_guide, "image_mask" : image_mask} if image_mode >= 1 else {}
 
-            src_ref_images  = image_refs
+            src_ref_images, src_ref_masks  = image_refs, None
             image_start_tensor = image_end_tensor = None
             if window_no == 1 and (video_source is not None or image_start is not None):
                 if image_start is not None:
@@ -4943,16 +5007,52 @@ def generate_video(
                 from models.wan.multitalk.multitalk import get_window_audio_embeddings
                 # special treatment for start frame pos when alignement to first frame requested as otherwise the start frame number will be negative due to overlapped frames (has been previously compensated later with padding)
                 audio_proj_split = get_window_audio_embeddings(audio_proj_full, audio_start_idx= aligned_window_start_frame + (source_video_overlap_frames_count if reset_control_aligment else 0 ), clip_length = current_video_length)
-            if vace:
-                video_guide_processed = video_mask_processed = video_guide_processed2 = video_mask_processed2 = None
+
+            if repeat_no == 1 and window_no == 1 and image_refs is not None and len(image_refs) > 0:
+                frames_positions_list = []
+                if frames_positions is not None and len(frames_positions)> 0:
+                    positions = frames_positions.replace(","," ").split(" ")
+                    cur_end_pos =  -1 + (source_video_frames_count - source_video_overlap_frames_count)
+                    last_frame_no = requested_frames_to_generate + source_video_frames_count - source_video_overlap_frames_count
+                    joker_used = False
+                    project_window_no = 1
+                    for pos in positions :
+                        if len(pos) > 0:
+                            if pos in ["L", "l"]:
+                                cur_end_pos += sliding_window_size if project_window_no > 1 else current_video_length 
+                                if cur_end_pos >= last_frame_no and not joker_used:
+                                    joker_used = True
+                                    cur_end_pos = last_frame_no -1
+                                project_window_no += 1
+                                frames_positions_list.append(cur_end_pos)
+                                cur_end_pos -= sliding_window_discard_last_frames + reuse_frames
+                            else:
+                                frames_positions_list.append(int(pos)-1 + alignment_shift)
+                    frames_positions_list = frames_positions_list[:len(image_refs)]
+                nb_frames_positions = len(frames_positions_list) 
+                if nb_frames_positions > 0:
+                    frames_to_inject = [None] * (max(frames_positions_list) + 1)
+                    for i, pos in enumerate(frames_positions_list):
+                        frames_to_inject[pos] = image_refs[i] 
+
 
             if video_guide is not None:
-                keep_frames_parsed, error = parse_keep_frames_video_guide(keep_frames_video_guide, source_video_frames_count -source_video_overlap_frames_count + requested_frames_to_generate)
+                keep_frames_parsed_full, error = parse_keep_frames_video_guide(keep_frames_video_guide, source_video_frames_count -source_video_overlap_frames_count + requested_frames_to_generate)
                 if len(error) > 0:
                     raise gr.Error(f"invalid keep frames {keep_frames_video_guide}")
-                keep_frames_parsed = keep_frames_parsed[aligned_guide_start_frame: aligned_guide_end_frame ]
+                guide_frames_extract_start = aligned_window_start_frame if extract_guide_from_window_start else aligned_guide_start_frame
+                keep_frames_parsed = [True] * -guide_frames_extract_start if guide_frames_extract_start  <0 else []
+                keep_frames_parsed += keep_frames_parsed_full[max(0, guide_frames_extract_start): aligned_guide_end_frame ] 
+                guide_frames_extract_count = len(keep_frames_parsed)
 
-                if vace:
+                if "B" in video_prompt_type:
+                    send_cmd("progress", [0, get_latest_status(state, "Extracting Face Movements")])
+                    src_faces = extract_faces_from_video_with_mask(video_guide, video_mask, max_frames= guide_frames_extract_count, start_frame= guide_frames_extract_start, size= 512, target_fps = fps)
+                    if src_faces is not None and src_faces.shape[1] < current_video_length:
+                        src_faces = torch.cat([src_faces, torch.full( (3, current_video_length - src_faces.shape[1], 512, 512 ), -1, dtype = src_faces.dtype, device= src_faces.device) ], dim=1)
+
+                if vace or animate:
+                    video_guide_processed = video_mask_processed = video_guide_processed2 = video_mask_processed2 = None
                     context_scale = [ control_net_weight]
                     if "V" in video_prompt_type:
                         process_outside_mask = process_map_outside_mask.get(filter_letters(video_prompt_type, "YWX"), None)
@@ -4971,10 +5071,10 @@ def generate_video(
                         if preprocess_type2 is not None:
                             context_scale = [ control_net_weight /2, control_net_weight2 /2]
                         send_cmd("progress", [0, get_latest_status(state, status_info)])
-                        inpaint_color = 0 if preprocess_type=="pose" and process_outside_mask=="inpaint" else 127
-                        video_guide_processed, video_mask_processed = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= len(keep_frames_parsed) , start_frame = aligned_guide_start_frame, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =1, inpaint_color =inpaint_color )
+                        inpaint_color = 0 if preprocess_type=="pose" else guide_inpaint_color
+                        video_guide_processed, video_mask_processed = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =1, inpaint_color =inpaint_color )
                         if preprocess_type2 != None:
-                            video_guide_processed2, video_mask_processed2 = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= len(keep_frames_parsed), start_frame = aligned_guide_start_frame, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type2, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =2 )
+                            video_guide_processed2, video_mask_processed2 = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type2, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =2 )
 
                         if video_guide_processed != None:
                             if sample_fit_canvas != None:
@@ -4985,7 +5085,37 @@ def generate_video(
                                 refresh_preview["video_guide"] = [refresh_preview["video_guide"], Image.fromarray(video_guide_processed2[0].cpu().numpy())] 
                             if video_mask_processed != None:                        
                                 refresh_preview["video_mask"] = Image.fromarray(video_mask_processed[0].cpu().numpy())
-                elif ltxv:
+
+                    frames_to_inject_parsed = frames_to_inject[ window_start_frame if extract_guide_from_window_start else guide_start_frame: guide_end_frame]
+
+                    if not vace and (any_letters(video_prompt_type ,"FV") or model_def.get("forced_guide_mask_inputs", False)): 
+                        any_mask = True
+                        any_guide_padding = model_def.get("pad_guide_video", False)
+                        from shared.utils.utils import prepare_video_guide_and_mask
+                        src_videos, src_masks = prepare_video_guide_and_mask( [video_guide_processed, video_guide_processed2], 
+                                                                                [video_mask_processed, video_mask_processed2], 
+                                                                                pre_video_guide, image_size, current_video_length, latent_size,
+                                                                                any_mask, any_guide_padding, guide_inpaint_color, extract_guide_from_window_start,
+                                                                                keep_frames_parsed, frames_to_inject_parsed , outpainting_dims)
+
+                        src_video, src_video2 = src_videos 
+                        src_mask, src_mask2 = src_masks 
+                        if src_video is None:
+                            abort = True 
+                            break
+                        if src_faces is not None:
+                            if src_faces.shape[1] < src_video.shape[1]:
+                                src_faces = torch.concat( [src_faces,  src_faces[:, -1:].repeat(1, src_video.shape[1] - src_faces.shape[1], 1,1)], dim =1)
+                            else:
+                                src_faces = src_faces[:, :src_video.shape[1]]
+                        if args.save_masks:
+                            save_video( src_video, "masked_frames.mp4", fps)
+                            if src_video2 is not None:
+                                save_video( src_video2, "masked_frames2.mp4", fps)
+                            if any_mask:
+                                save_video( src_mask, "masks.mp4", fps, value_range=(0, 1))
+
+                elif ltxv:          
                     preprocess_type = process_map_video_guide.get(filter_letters(video_prompt_type, "PED"), "raw")
                     status_info = "Extracting " + processes_names[preprocess_type]
                     send_cmd("progress", [0, get_latest_status(state, status_info)])
@@ -5023,7 +5153,7 @@ def generate_video(
                         sample_fit_canvas = None
 
                 else: # video to video
-                    video_guide_processed = preprocess_video(width = image_size[1], height=image_size[0], video_in=video_guide, max_frames= len(keep_frames_parsed), start_frame = aligned_guide_start_frame, fit_canvas= sample_fit_canvas, fit_crop = fit_crop, target_fps = fps)
+                    video_guide_processed = preprocess_video(width = image_size[1], height=image_size[0], video_in=video_guide, max_frames= len(keep_frames_parsed), start_frame = aligned_guide_start_frame, fit_canvas= sample_fit_canvas, fit_crop = fit_crop, target_fps = fps, block_size= block_size)
                     if video_guide_processed is None:
                         src_video = pre_video_guide
                     else:
@@ -5043,29 +5173,6 @@ def generate_video(
                     refresh_preview["image_mask"] = new_image_mask
 
             if window_no == 1 and image_refs is not None and len(image_refs) > 0:
-                if repeat_no == 1:
-                    frames_positions_list = []
-                    if frames_positions is not None and len(frames_positions)> 0:
-                        positions = frames_positions.split(" ")
-                        cur_end_pos =  -1 + (source_video_frames_count - source_video_overlap_frames_count) #if reset_control_aligment else 0
-                        last_frame_no = requested_frames_to_generate + source_video_frames_count - source_video_overlap_frames_count
-                        joker_used = False
-                        project_window_no = 1
-                        for pos in positions :
-                            if len(pos) > 0:
-                                if pos in ["L", "l"]:
-                                    cur_end_pos += sliding_window_size if project_window_no > 1 else current_video_length 
-                                    if cur_end_pos >= last_frame_no and not joker_used:
-                                        joker_used = True
-                                        cur_end_pos = last_frame_no -1
-                                    project_window_no += 1
-                                    frames_positions_list.append(cur_end_pos)
-                                    cur_end_pos -= sliding_window_discard_last_frames + reuse_frames
-                                else:
-                                    frames_positions_list.append(int(pos)-1 + alignment_shift)
-                        frames_positions_list = frames_positions_list[:len(image_refs)]
-                    nb_frames_positions = len(frames_positions_list) 
-
                 if sample_fit_canvas is not None and (nb_frames_positions > 0 or "K" in video_prompt_type) :
                     from shared.utils.utils import get_outpainting_full_area_dimensions
                     w, h = image_refs[0].size
@@ -5089,20 +5196,16 @@ def generate_video(
                         if remove_background_images_ref > 0:
                             send_cmd("progress", [0, get_latest_status(state, "Removing Images References Background")])
                         # keep image ratios if there is a background image ref (we will let the model preprocessor decide what to do) but remove bg if requested
-                        image_refs[nb_frames_positions:]  = resize_and_remove_background(image_refs[nb_frames_positions:] , image_size[1], image_size[0],
+                        image_refs[nb_frames_positions:], src_ref_masks  = resize_and_remove_background(image_refs[nb_frames_positions:] , image_size[1], image_size[0],
                                                                                         remove_background_images_ref > 0, any_background_ref, 
                                                                                         fit_into_canvas= 0 if (any_background_ref > 0 or model_def.get("lock_image_refs_ratios", False)) else 1,
                                                                                         block_size=block_size,
-                                                                                        outpainting_dims =outpainting_dims )
+                                                                                        outpainting_dims =outpainting_dims,
+                                                                                        background_ref_outpainted = model_def.get("background_ref_outpainted", True) )
                         refresh_preview["image_refs"] = image_refs
 
-                    if nb_frames_positions > 0:
-                        frames_to_inject = [None] * (max(frames_positions_list) + 1)
-                        for i, pos in enumerate(frames_positions_list):
-                            frames_to_inject[pos] = image_refs[i] 
 
             if vace :
-                frames_to_inject_parsed = frames_to_inject[guide_start_frame: guide_end_frame]
                 image_refs_copy = image_refs[nb_frames_positions:].copy() if image_refs != None and len(image_refs) > nb_frames_positions else None # required since prepare_source do inplace modifications
 
                 src_video, src_mask, src_ref_images = wan_model.prepare_source([video_guide_processed] if video_guide_processed2 == None else [video_guide_processed, video_guide_processed2],
@@ -5116,7 +5219,7 @@ def generate_video(
                                                                         any_background_ref = any_background_ref
                                                                         )
                 if len(frames_to_inject_parsed) or any_background_ref:
-                    new_image_refs = [convert_tensor_to_image(src_video[0], frame_no + aligned_guide_start_frame - aligned_window_start_frame) for frame_no, inject in enumerate(frames_to_inject_parsed) if inject]                    
+                    new_image_refs = [convert_tensor_to_image(src_video[0], frame_no + 0 if extract_guide_from_window_start else (aligned_guide_start_frame - aligned_window_start_frame) ) for frame_no, inject in enumerate(frames_to_inject_parsed) if inject]
                     if any_background_ref:
                         new_image_refs +=  [convert_tensor_to_image(image_refs_copy[0], 0)] + image_refs[nb_frames_positions+1:]
                     else:
@@ -5165,10 +5268,14 @@ def generate_video(
                     input_prompt = prompt,
                     image_start = image_start_tensor,  
                     image_end = image_end_tensor,
-                    input_frames = src_video,   
+                    input_frames = src_video,
+                    input_frames2 = src_video2,
                     input_ref_images=  src_ref_images,
+                    input_ref_masks = src_ref_masks,
                     input_masks = src_mask,
+                    input_masks2 = src_mask2,
                     input_video= pre_video_guide,
+                    input_faces = src_faces,
                     denoising_strength=denoising_strength,
                     prefix_frames_count = source_video_overlap_frames_count if window_no <= 1 else reuse_frames,
                     frame_num= (current_video_length // latent_size)* latent_size + 1,
@@ -5302,6 +5409,7 @@ def generate_video(
                 send_cmd("output")  
             else:
                 sample = samples.cpu()
+                abort = not is_image and sample.shape[1] < current_video_length    
                 # if True: # for testing
                 #     torch.save(sample, "output.pt")
                 # else:
@@ -6980,7 +7088,7 @@ def refresh_video_prompt_type_alignment(state, video_prompt_type, video_prompt_t
 
 def refresh_video_prompt_type_video_guide(state, video_prompt_type, video_prompt_type_video_guide,  image_mode, old_image_mask_guide_value, old_image_guide_value, old_image_mask_value ):
     old_video_prompt_type = video_prompt_type
-    video_prompt_type = del_in_sequence(video_prompt_type, "PDESLCMUV")
+    video_prompt_type = del_in_sequence(video_prompt_type, "PDESLCMUVB")
     video_prompt_type = add_to_sequence(video_prompt_type, video_prompt_type_video_guide)
     visible = "V" in video_prompt_type
     model_type = state["model_type"]
@@ -7437,7 +7545,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 image_prompt_type = gr.Text(value= image_prompt_type_value, visible= False)
                 image_prompt_type_choices = []
                 if "T" in image_prompt_types_allowed: 
-                    image_prompt_type_choices += [("Text Prompt Only", "")]
+                    image_prompt_type_choices += [("Text Prompt Only" if "S" in image_prompt_types_allowed else "New Video", "")]
                 if "S" in image_prompt_types_allowed: 
                     image_prompt_type_choices += [("Start Video with Image", "S")]
                     any_start_image = True
@@ -7516,7 +7624,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         if image_outputs: video_prompt_type_video_guide_label = video_prompt_type_video_guide_label.replace("Video", "Image")
                         video_prompt_type_video_guide = gr.Dropdown(
                             guide_preprocessing_choices,
-                            value=filter_letters(video_prompt_type_value, "PDESLCMUV", guide_preprocessing.get("default", "") ),
+                            value=filter_letters(video_prompt_type_value, "PDESLCMUVB", guide_preprocessing.get("default", "") ),
                             label= video_prompt_type_video_guide_label , scale = 2, visible= guide_preprocessing.get("visible", True) , show_label= True,
                         )
                         any_control_video = True
@@ -7560,13 +7668,13 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         }
 
                         mask_preprocessing_choices = []
-                        mask_preprocessing_labels = guide_preprocessing.get("labels", {}) 
+                        mask_preprocessing_labels = mask_preprocessing.get("labels", {}) 
                         for process_type in mask_preprocessing["selection"]:
                             process_label = mask_preprocessing_labels.get(process_type, None)
                             process_label = mask_preprocessing_labels_all.get(process_type, process_type) if process_label is None else process_label
                             mask_preprocessing_choices.append( (process_label, process_type) )
 
-                        video_prompt_type_video_mask_label = guide_preprocessing.get("label", "Area Processed")
+                        video_prompt_type_video_mask_label = mask_preprocessing.get("label", "Area Processed")
                         video_prompt_type_video_mask = gr.Dropdown(
                             mask_preprocessing_choices,
                             value=filter_letters(video_prompt_type_value, "XYZWNA", mask_preprocessing.get("default", "")),
@@ -7591,7 +7699,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             choices= image_ref_choices["choices"],
                             value=filter_letters(video_prompt_type_value, image_ref_choices["letters_filter"]),
                             visible = image_ref_choices.get("visible", True),
-                            label=image_ref_choices.get("label", "Ref. Images Type"), show_label= True, scale = 2
+                            label=image_ref_choices.get("label", "Inject Reference Images"), show_label= True, scale = 2
                         )
 
                 image_guide = gr.Image(label= "Control Image", height = 800, type ="pil", visible= image_mode_value==1 and "V" in video_prompt_type_value and ("U" in video_prompt_type_value or not "A" in video_prompt_type_value ) , value= ui_defaults.get("image_guide", None))
@@ -7634,7 +7742,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                     video_guide_outpainting_value = ui_defaults.get("video_guide_outpainting","#")
                     video_guide_outpainting = gr.Text(value=video_guide_outpainting_value , visible= False)
                     with gr.Group():
-                        video_guide_outpainting_checkbox = gr.Checkbox(label="Enable Spatial Outpainting on Control Video, Landscape or Injected Reference Frames" if image_mode_value == 0 else "Enable Spatial Outpainting on Control Image", value=len(video_guide_outpainting_value)>0 and not video_guide_outpainting_value.startswith("#") )
+                        video_guide_outpainting_checkbox = gr.Checkbox(label="Enable Spatial Outpainting on Control Video, Landscape or Positioned Reference Frames" if image_mode_value == 0 else "Enable Spatial Outpainting on Control Image", value=len(video_guide_outpainting_value)>0 and not video_guide_outpainting_value.startswith("#") )
                         with gr.Row(visible = not video_guide_outpainting_value.startswith("#")) as video_guide_outpainting_row:
                             video_guide_outpainting_value = video_guide_outpainting_value[1:] if video_guide_outpainting_value.startswith("#") else video_guide_outpainting_value
                             video_guide_outpainting_list = [0] * 4 if len(video_guide_outpainting_value) == 0 else [int(v) for v in video_guide_outpainting_value.split(" ")]
@@ -7649,14 +7757,14 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 mask_expand = gr.Slider(-10, 50, value=ui_defaults.get("mask_expand", 0), step=1, label="Expand / Shrink Mask Area", visible= "V" in video_prompt_type_value and "A" in video_prompt_type_value and not "U" in video_prompt_type_value )
 
                 image_refs_single_image_mode = model_def.get("one_image_ref_needed", False)
-                image_refs_label = "Start Image" if hunyuan_video_avatar else ("Reference Image" if image_refs_single_image_mode else "Reference Images")  + (" (each Image will start a new Clip)" if infinitetalk else "")
+                image_refs_label = "Start Image" if hunyuan_video_avatar else ("Reference Image" if image_refs_single_image_mode else "Reference Images")  + (" (each Image will be associated to a Sliding Window)" if infinitetalk else "")
                 image_refs_row, image_refs, image_refs_extra = get_image_gallery(label= image_refs_label, value = ui_defaults.get("image_refs", None), visible= "I" in video_prompt_type_value, single_image_mode=image_refs_single_image_mode)
 
                 frames_positions = gr.Text(value=ui_defaults.get("frames_positions","") , visible= "F" in video_prompt_type_value, scale = 2, label= "Positions of Injected Frames (1=first, L=last of a window) no position for other Image Refs)" ) 
                 image_refs_relative_size = gr.Slider(20, 100, value=ui_defaults.get("image_refs_relative_size", 50), step=1, label="Rescale Internaly Image Ref (% in relation to Output Video) to change Output Composition", visible = model_def.get("any_image_refs_relative_size", False) and image_outputs)
 
                 no_background_removal = model_def.get("no_background_removal", False) or image_ref_choices is None
-                background_removal_label = model_def.get("background_removal_label", "Remove Backgrounds behind People / Objects") 
+                background_removal_label = model_def.get("background_removal_label", "Remove Background behind People / Objects") 
  
                 remove_background_images_ref = gr.Dropdown(
                     choices=[
@@ -7664,7 +7772,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         (background_removal_label, 1),
                     ],
                     value=0 if no_background_removal else ui_defaults.get("remove_background_images_ref",1),
-                    label="Automatic Removal of Background of People or Objects (Only)", scale = 3, visible= "I" in video_prompt_type_value and not no_background_removal
+                    label="Automatic Removal of Background behind People or Objects in Reference Images", scale = 3, visible= "I" in video_prompt_type_value and not no_background_removal
                 )
 
             any_audio_voices_support = any_audio_track(base_model_type) 
@@ -8084,7 +8192,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                                 ("Aligned to the beginning of the First Window of the new Video Sample", "T"),
                             ],
                             value=filter_letters(video_prompt_type_value, "T"),
-                            label="Control Video / Injected Frames / Control Audio temporal alignment when any Video to continue",
+                            label="Control Video / Control Audio / Positioned Frames Temporal Alignment when any Video to continue",
                             visible = vace or ltxv or t2v or infinitetalk
                         )
 
