@@ -24,6 +24,7 @@ from shared.utils import notification_sound
 from shared.utils.loras_mutipliers import preparse_loras_multipliers, parse_loras_multipliers
 from shared.utils.utils import convert_tensor_to_image, save_image, get_video_info, get_file_creation_date, convert_image_to_video, calculate_new_dimensions, convert_image_to_tensor, calculate_dimensions_and_resize_image, rescale_and_crop, get_video_frame, resize_and_remove_background, rgb_bw_to_rgba_mask
 from shared.utils.utils import calculate_new_dimensions, get_outpainting_frame_location, get_outpainting_full_area_dimensions
+from shared.utils.utils import has_video_file_extension, has_image_file_extension
 from shared.utils.audio_video import extract_audio_tracks, combine_video_with_audio_tracks, combine_and_concatenate_video_with_audio_tracks, cleanup_temp_audio_files,  save_video, save_image
 from shared.utils.audio_video import save_image_metadata, read_image_metadata
 from shared.match_archi import match_nvidia_architecture
@@ -62,7 +63,7 @@ AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
 
 target_mmgp_version = "3.6.0"
-WanGP_version = "8.61"
+WanGP_version = "8.7"
 settings_version = 2.35
 max_source_video_frames = 3000
 prompt_enhancer_image_caption_model, prompt_enhancer_image_caption_processor, prompt_enhancer_llm_model, prompt_enhancer_llm_tokenizer = None, None, None, None
@@ -1942,7 +1943,8 @@ def get_model_min_frames_and_step(model_type):
     mode_def = get_model_def(model_type)
     frames_minimum = mode_def.get("frames_minimum", 5)
     frames_steps = mode_def.get("frames_steps", 4)
-    return frames_minimum, frames_steps 
+    latent_size = mode_def.get("latent_size", frames_steps)
+    return frames_minimum, frames_steps, latent_size 
     
 def get_model_fps(model_type):
     mode_def = get_model_def(model_type)
@@ -3459,7 +3461,7 @@ def select_video(state, input_file_list, event_data: gr.EventData):
             if len(video_other_prompts) >0 :
                 values += [video_other_prompts]
                 labels += ["Other Prompts"]
-            if len(video_outpainting) >0 and any_letters(video_image_prompt_type, "VFK"):
+            if len(video_outpainting) >0:
                 values += [video_outpainting]
                 labels += ["Outpainting"]
             video_sample_solver = configs.get("sample_solver", "")
@@ -3532,6 +3534,11 @@ def convert_image(image):
     return cast(Image, ImageOps.exif_transpose(image))
 
 def get_resampled_video(video_in, start_frame, max_frames, target_fps, bridge='torch'):
+    if isinstance(video_in, str) and has_image_file_extension(video_in):
+        video_in = Image.open(video_in)
+    if isinstance(video_in, Image.Image):
+        return torch.from_numpy(np.array(video_in).astype(np.uint8)).unsqueeze(0)
+    
     from shared.utils.utils import resample
 
     import decord
@@ -3653,19 +3660,22 @@ def get_preprocessor(process_type, inpaint_color):
 def process_images_multithread(image_processor, items, process_type, wrap_in_list = True, max_workers: int = os.cpu_count()/ 2) :
     if not items:
        return []    
-    max_workers = 11
+
     import concurrent.futures
     start_time = time.time()
     # print(f"Preprocessus:{process_type} started")
     if process_type in ["prephase", "upsample"]: 
         if wrap_in_list :
             items = [ [img] for img in items]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(image_processor, img): idx for idx, img in enumerate(items)}
-            results = [None] * len(items)
-            for future in concurrent.futures.as_completed(futures):
-                idx = futures[future]
-                results[idx] = future.result()
+        if max_workers == 1:
+            results = [image_processor(img) for img in items]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(image_processor, img): idx for idx, img in enumerate(items)}
+                results = [None] * len(items)
+                for future in concurrent.futures.as_completed(futures):
+                    idx = futures[future]
+                    results[idx] = future.result()
 
         if wrap_in_list: 
             results = [ img[0] for img in results]
@@ -3677,55 +3687,6 @@ def process_images_multithread(image_processor, items, process_type, wrap_in_lis
 
     return results
 
-def preprocess_image_with_mask(input_image, input_mask, height, width, fit_canvas = False, fit_crop = False, block_size= 16, expand_scale = 2, outpainting_dims = None, inpaint_color = 127):
-    frame_width, frame_height = input_image.size
-
-    if fit_crop:
-        input_image = rescale_and_crop(input_image, width, height)
-        if input_mask is not None:
-            input_mask = rescale_and_crop(input_mask, width, height)
-        return input_image, input_mask
-
-    if outpainting_dims != None:
-        if fit_canvas != None:
-            frame_height, frame_width = get_outpainting_full_area_dimensions(frame_height,frame_width, outpainting_dims)
-        else:
-            frame_height, frame_width = height, width
-
-    if fit_canvas != None:
-        height, width = calculate_new_dimensions(height, width, frame_height, frame_width, fit_into_canvas = fit_canvas, block_size = block_size)
-
-    if outpainting_dims != None:
-        final_height, final_width = height, width
-        height, width, margin_top, margin_left =  get_outpainting_frame_location(final_height, final_width,  outpainting_dims, 1)        
-
-    if fit_canvas != None or outpainting_dims != None:
-        input_image = input_image.resize((width, height), resample=Image.Resampling.LANCZOS)
-        if input_mask is not None:
-            input_mask = input_mask.resize((width, height), resample=Image.Resampling.LANCZOS)
-
-    if expand_scale != 0 and input_mask is not None:
-        kernel_size = abs(expand_scale)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        op_expand = cv2.dilate if expand_scale > 0 else cv2.erode
-        input_mask = np.array(input_mask) 
-        input_mask = op_expand(input_mask, kernel, iterations=3)
-        input_mask = Image.fromarray(input_mask)
-
-    if outpainting_dims != None:
-        inpaint_color = inpaint_color / 127.5-1
-        image = convert_image_to_tensor(input_image)
-        full_frame= torch.full( (image.shape[0], final_height, final_width),  inpaint_color, dtype= torch.float, device= image.device)
-        full_frame[:, margin_top:margin_top+height, margin_left:margin_left+width] = image
-        input_image = convert_tensor_to_image(full_frame) 
-
-        if input_mask is not None:
-            mask = convert_image_to_tensor(input_mask)
-            full_frame= torch.full( (mask.shape[0], final_height, final_width), 1, dtype= torch.float, device= mask.device)
-            full_frame[:, margin_top:margin_top+height, margin_left:margin_left+width] = mask
-            input_mask = convert_tensor_to_image(full_frame) 
-
-    return input_image, input_mask
 def extract_faces_from_video_with_mask(input_video_path, input_mask_path, max_frames, start_frame, target_fps, size = 512):
     if not input_video_path or max_frames <= 0:
         return None, None
@@ -3780,6 +3741,8 @@ def extract_faces_from_video_with_mask(input_video_path, input_mask_path, max_fr
         save_one_video(f"faces.mp4", saved_faces_frames, fps=target_fps, quality=8, macro_block_size=None)
     return face_tensor
 
+def get_default_workers():
+    return os.cpu_count()/ 2
 
 def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,  max_frames, start_frame=0, fit_canvas = None, fit_crop = False, target_fps = 16, block_size= 16, expand_scale = 2, process_type = "inpaint", process_type2 = None, to_bbox = False, RGB_Mask = False, negate_mask = False, process_outside_mask = None, inpaint_color = 127, outpainting_dims = None, proc_no = 1):
 
@@ -3906,8 +3869,8 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
             return (target_frame, frame, mask) 
         else:
             return (target_frame, None, None)
-
-    proc_lists = process_images_multithread(prep_prephase, [frame_idx for frame_idx in range(num_frames)], "prephase", wrap_in_list= False)
+    max_workers = get_default_workers()
+    proc_lists = process_images_multithread(prep_prephase, [frame_idx for frame_idx in range(num_frames)], "prephase", wrap_in_list= False, max_workers=max_workers)
     proc_list, proc_list_outside, proc_mask = [None] * len(proc_lists), [None] * len(proc_lists), [None] * len(proc_lists)
     for frame_idx, frame_group in enumerate(proc_lists): 
         proc_list[frame_idx], proc_list_outside[frame_idx], proc_mask[frame_idx] = frame_group
@@ -3916,11 +3879,11 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
     mask_video = None
 
     if preproc2 != None:
-        proc_list2 = process_images_multithread(preproc2, proc_list, process_type2)
+        proc_list2 = process_images_multithread(preproc2, proc_list, process_type2, max_workers=max_workers)
         #### to be finished ...or not
-    proc_list = process_images_multithread(preproc, proc_list, process_type)
+    proc_list = process_images_multithread(preproc, proc_list, process_type, max_workers=max_workers)
     if any_mask:
-        proc_list_outside = process_images_multithread(preproc_outside, proc_list_outside, process_outside_mask)
+        proc_list_outside = process_images_multithread(preproc_outside, proc_list_outside, process_outside_mask, max_workers=max_workers)
     else:
         proc_list_outside = proc_mask = len(proc_list) * [None]
 
@@ -3938,7 +3901,7 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
                 full_frame= torch.full( (final_height, final_width, mask.shape[-1]), 255, dtype= torch.uint8, device= mask.device)
                 full_frame[margin_top:margin_top+height, margin_left:margin_left+width] = mask
                 mask = full_frame 
-            masks.append(mask)
+            masks.append(mask[:, :, 0:1].clone())
         else:
             masked_frame = processed_img
 
@@ -3958,13 +3921,13 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
         proc_list[frame_no] = proc_list_outside[frame_no] = proc_mask[frame_no] = None
 
 
-    if args.save_masks:
-        from preprocessing.dwpose.pose import save_one_video
-        saved_masked_frames = [mask.cpu().numpy() for mask in masked_frames ]
-        save_one_video(f"masked_frames{'' if proc_no==1 else str(proc_no)}.mp4", saved_masked_frames, fps=target_fps, quality=8, macro_block_size=None)
-        if any_mask:
-            saved_masks = [mask.cpu().numpy() for mask in masks ]
-            save_one_video("masks.mp4", saved_masks, fps=target_fps, quality=8, macro_block_size=None)
+    # if args.save_masks:
+    #     from preprocessing.dwpose.pose import save_one_video
+    #     saved_masked_frames = [mask.cpu().numpy() for mask in masked_frames ]
+    #     save_one_video(f"masked_frames{'' if proc_no==1 else str(proc_no)}.mp4", saved_masked_frames, fps=target_fps, quality=8, macro_block_size=None)
+    #     if any_mask:
+    #         saved_masks = [mask.cpu().numpy() for mask in masks ]
+    #         save_one_video("masks.mp4", saved_masks, fps=target_fps, quality=8, macro_block_size=None)
     preproc = None
     preproc_outside = None
     gc.collect()
@@ -3972,8 +3935,10 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
     if pad_frames > 0:
         masked_frames = masked_frames[0] * pad_frames + masked_frames
         if any_mask: masked_frames = masks[0] * pad_frames + masks
+    masked_frames = torch.stack(masked_frames).permute(-1,0,1,2).float().div_(127.5).sub_(1.)
+    masks = torch.stack(masks).permute(-1,0,1,2).float().div_(255) if any_mask else None
 
-    return torch.stack(masked_frames), torch.stack(masks) if any_mask else None
+    return masked_frames, masks
 
 def preprocess_video(height, width, video_in, max_frames, start_frame=0, fit_canvas = None, fit_crop = False, target_fps = 16, block_size = 16):
 
@@ -4102,7 +4067,7 @@ def perform_spatial_upsampling(sample, spatial_upsampling):
     frames_to_upsample = [sample[:, i] for i in range( sample.shape[1]) ] 
     def upsample_frames(frame):
         return resize_lanczos(frame, h, w).unsqueeze(1)
-    sample = torch.cat(process_images_multithread(upsample_frames, frames_to_upsample, "upsample", wrap_in_list = False), dim=1)
+    sample = torch.cat(process_images_multithread(upsample_frames, frames_to_upsample, "upsample", wrap_in_list = False, max_workers=get_default_workers()), dim=1)
     frames_to_upsample = None
     return sample 
 
@@ -4609,17 +4574,13 @@ def generate_video(
         batch_size = 1
     temp_filenames_list = []
 
-    convert_image_guide_to_video = model_def.get("convert_image_guide_to_video", False)
-    if convert_image_guide_to_video:
-        if image_guide is not None and isinstance(image_guide, Image.Image):
-            video_guide = convert_image_to_video(image_guide)
-            temp_filenames_list.append(video_guide)
-            image_guide = None
+    if image_guide is not None and isinstance(image_guide, Image.Image):
+        video_guide = image_guide
+        image_guide = None
 
-        if image_mask is not None and isinstance(image_mask, Image.Image):
-            video_mask = convert_image_to_video(image_mask)
-            temp_filenames_list.append(video_mask)
-            image_mask = None
+    if image_mask is not None and isinstance(image_mask, Image.Image):
+        video_mask = image_mask
+        image_mask = None
 
     if model_def.get("no_background_removal", False): remove_background_images_ref = 0
     
@@ -4711,22 +4672,12 @@ def generate_video(
     device_mem_capacity = torch.cuda.get_device_properties(None).total_memory / 1048576
     guide_inpaint_color = model_def.get("guide_inpaint_color", 127.5)
     extract_guide_from_window_start = model_def.get("extract_guide_from_window_start", False) 
-    i2v = test_class_i2v(model_type)
-    diffusion_forcing = "diffusion_forcing" in model_filename
-    t2v = base_model_type in ["t2v"]
-    ltxv = "ltxv" in model_filename
-    vace =  test_vace_module(base_model_type) 
-    hunyuan_t2v = "hunyuan_video_720" in model_filename
-    hunyuan_i2v = "hunyuan_video_i2v" in model_filename
     hunyuan_custom = "hunyuan_video_custom" in model_filename
     hunyuan_custom_audio =  hunyuan_custom and "audio" in model_filename
     hunyuan_custom_edit =  hunyuan_custom and "edit" in model_filename
     hunyuan_avatar = "hunyuan_video_avatar" in model_filename
     fantasy = base_model_type in ["fantasy"]
     multitalk = model_def.get("multitalk_class", False)
-    standin = model_def.get("standin_class", False)
-    infinitetalk = base_model_type in ["infinitetalk"]
-    animate =  base_model_type in ["animate"]
 
     if "B" in audio_prompt_type or "X" in audio_prompt_type:
         from models.wan.multitalk.multitalk import parse_speakers_locations
@@ -4763,9 +4714,9 @@ def generate_video(
         sliding_window_size = current_video_length
         reuse_frames = 0
 
-    _, latent_size = get_model_min_frames_and_step(model_type)  
-    if diffusion_forcing: latent_size = 4
+    _, _, latent_size = get_model_min_frames_and_step(model_type)  
     original_image_refs = image_refs
+    image_refs = None if image_refs is None else [] + image_refs # work on a copy as it is going to be modified
     # image_refs = None
     # nb_frames_positions= 0
     # Output Video Ratio Priorities:
@@ -4889,6 +4840,7 @@ def generate_video(
     initial_total_windows = 0
     discard_last_frames = sliding_window_discard_last_frames
     default_requested_frames_to_generate = current_video_length
+    nb_frames_positions = 0
     if sliding_window:
         initial_total_windows= compute_sliding_window_no(default_requested_frames_to_generate, sliding_window_size, discard_last_frames, reuse_frames) 
         current_video_length = sliding_window_size
@@ -4907,7 +4859,7 @@ def generate_video(
         if repeat_no >= total_generation: break
         repeat_no +=1
         gen["repeat_no"] = repeat_no
-        src_video = src_mask = src_ref_images = new_image_guide = new_image_mask  = src_faces = None
+        src_video = src_video2 = src_mask = src_mask2 = src_faces = src_ref_images = src_ref_masks = None
         prefix_video = pre_video_frame = None
         source_video_overlap_frames_count = 0 # number of frames overalapped in source video for first window
         source_video_frames_count = 0  # number of frames to use in source video (processing starts source_video_overlap_frames_count frames before )
@@ -4963,7 +4915,6 @@ def generate_video(
                 return_latent_slice = slice(-(reuse_frames - 1 + discard_last_frames ) // latent_size - 1, None if discard_last_frames == 0 else -(discard_last_frames // latent_size) )
             refresh_preview  = {"image_guide" : image_guide, "image_mask" : image_mask} if image_mode >= 1 else {}
 
-            src_ref_images, src_ref_masks  = image_refs, None
             image_start_tensor = image_end_tensor = None
             if window_no == 1 and (video_source is not None or image_start is not None):
                 if image_start is not None:
@@ -5020,7 +4971,7 @@ def generate_video(
                         if len(pos) > 0:
                             if pos in ["L", "l"]:
                                 cur_end_pos += sliding_window_size if project_window_no > 1 else current_video_length 
-                                if cur_end_pos >= last_frame_no and not joker_used:
+                                if cur_end_pos >= last_frame_no-1 and not joker_used:
                                     joker_used = True
                                     cur_end_pos = last_frame_no -1
                                 project_window_no += 1
@@ -5036,141 +4987,53 @@ def generate_video(
                         frames_to_inject[pos] = image_refs[i] 
 
 
+            video_guide_processed = video_mask_processed = video_guide_processed2 = video_mask_processed2 = None
             if video_guide is not None:
                 keep_frames_parsed_full, error = parse_keep_frames_video_guide(keep_frames_video_guide, source_video_frames_count -source_video_overlap_frames_count + requested_frames_to_generate)
                 if len(error) > 0:
                     raise gr.Error(f"invalid keep frames {keep_frames_video_guide}")
                 guide_frames_extract_start = aligned_window_start_frame if extract_guide_from_window_start else aligned_guide_start_frame
+                extra_control_frames = model_def.get("extra_control_frames", 0)
+                if extra_control_frames > 0 and aligned_guide_start_frame >= extra_control_frames: guide_frames_extract_start -= extra_control_frames
+                        
                 keep_frames_parsed = [True] * -guide_frames_extract_start if guide_frames_extract_start  <0 else []
                 keep_frames_parsed += keep_frames_parsed_full[max(0, guide_frames_extract_start): aligned_guide_end_frame ] 
                 guide_frames_extract_count = len(keep_frames_parsed)
 
+                # Extract Faces to video
                 if "B" in video_prompt_type:
                     send_cmd("progress", [0, get_latest_status(state, "Extracting Face Movements")])
                     src_faces = extract_faces_from_video_with_mask(video_guide, video_mask, max_frames= guide_frames_extract_count, start_frame= guide_frames_extract_start, size= 512, target_fps = fps)
                     if src_faces is not None and src_faces.shape[1] < current_video_length:
                         src_faces = torch.cat([src_faces, torch.full( (3, current_video_length - src_faces.shape[1], 512, 512 ), -1, dtype = src_faces.dtype, device= src_faces.device) ], dim=1)
 
-                if vace or animate:
-                    video_guide_processed = video_mask_processed = video_guide_processed2 = video_mask_processed2 = None
-                    context_scale = [ control_net_weight]
-                    if "V" in video_prompt_type:
-                        process_outside_mask = process_map_outside_mask.get(filter_letters(video_prompt_type, "YWX"), None)
-                        preprocess_type, preprocess_type2 =  "raw", None 
-                        for process_num, process_letter in enumerate( filter_letters(video_prompt_type, "PEDSLCMU")):
-                            if process_num == 0:
-                                preprocess_type = process_map_video_guide.get(process_letter, "raw")
-                            else:
-                                preprocess_type2 = process_map_video_guide.get(process_letter, None)
-                        status_info = "Extracting " + processes_names[preprocess_type]
-                        extra_process_list = ([] if preprocess_type2==None else [preprocess_type2]) + ([] if process_outside_mask==None or process_outside_mask == preprocess_type else [process_outside_mask])
-                        if len(extra_process_list) == 1:
-                            status_info += " and " + processes_names[extra_process_list[0]]
-                        elif len(extra_process_list) == 2:
-                            status_info +=  ", " + processes_names[extra_process_list[0]] + " and " + processes_names[extra_process_list[1]]
-                        if preprocess_type2 is not None:
-                            context_scale = [ control_net_weight /2, control_net_weight2 /2]
-                        send_cmd("progress", [0, get_latest_status(state, status_info)])
-                        inpaint_color = 0 if preprocess_type=="pose" else guide_inpaint_color
-                        video_guide_processed, video_mask_processed = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =1, inpaint_color =inpaint_color )
-                        if preprocess_type2 != None:
-                            video_guide_processed2, video_mask_processed2 = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type2, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =2 )
+                # Sparse Video to Video
+                sparse_video_image = get_video_frame(video_guide, aligned_guide_start_frame, return_last_if_missing = True, target_fps = fps, return_PIL = True) if "R" in video_prompt_type else None
 
-                        if video_guide_processed != None:
-                            if sample_fit_canvas != None:
-                                image_size = video_guide_processed.shape[-3: -1]
-                                sample_fit_canvas = None
-                            refresh_preview["video_guide"] = Image.fromarray(video_guide_processed[0].cpu().numpy())
-                            if video_guide_processed2 != None:
-                                refresh_preview["video_guide"] = [refresh_preview["video_guide"], Image.fromarray(video_guide_processed2[0].cpu().numpy())] 
-                            if video_mask_processed != None:                        
-                                refresh_preview["video_mask"] = Image.fromarray(video_mask_processed[0].cpu().numpy())
-
-                    frames_to_inject_parsed = frames_to_inject[ window_start_frame if extract_guide_from_window_start else guide_start_frame: guide_end_frame]
-
-                    if not vace and (any_letters(video_prompt_type ,"FV") or model_def.get("forced_guide_mask_inputs", False)): 
-                        any_mask = True
-                        any_guide_padding = model_def.get("pad_guide_video", False)
-                        from shared.utils.utils import prepare_video_guide_and_mask
-                        src_videos, src_masks = prepare_video_guide_and_mask( [video_guide_processed, video_guide_processed2], 
-                                                                                [video_mask_processed, video_mask_processed2], 
-                                                                                pre_video_guide, image_size, current_video_length, latent_size,
-                                                                                any_mask, any_guide_padding, guide_inpaint_color, extract_guide_from_window_start,
-                                                                                keep_frames_parsed, frames_to_inject_parsed , outpainting_dims)
-
-                        src_video, src_video2 = src_videos 
-                        src_mask, src_mask2 = src_masks 
-                        if src_video is None:
-                            abort = True 
-                            break
-                        if src_faces is not None:
-                            if src_faces.shape[1] < src_video.shape[1]:
-                                src_faces = torch.concat( [src_faces,  src_faces[:, -1:].repeat(1, src_video.shape[1] - src_faces.shape[1], 1,1)], dim =1)
-                            else:
-                                src_faces = src_faces[:, :src_video.shape[1]]
-                        if args.save_masks:
-                            save_video( src_video, "masked_frames.mp4", fps)
-                            if src_video2 is not None:
-                                save_video( src_video2, "masked_frames2.mp4", fps)
-                            if any_mask:
-                                save_video( src_mask, "masks.mp4", fps, value_range=(0, 1))
-
-                elif ltxv:          
-                    preprocess_type = process_map_video_guide.get(filter_letters(video_prompt_type, "PED"), "raw")
-                    status_info = "Extracting " + processes_names[preprocess_type]
-                    send_cmd("progress", [0, get_latest_status(state, status_info)])
-                    # start one frame ealier to facilitate latents merging later
-                    src_video, _ = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= len(keep_frames_parsed) + (0 if aligned_guide_start_frame == 0 else 1), start_frame = aligned_guide_start_frame - (0 if aligned_guide_start_frame == 0 else 1), fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type, inpaint_color = 0, proc_no =1, negate_mask = "N" in video_prompt_type, process_outside_mask = "inpaint" if "X" in video_prompt_type else "identity", block_size =block_size )
-                    if src_video !=  None:
-                        src_video = src_video[ :(len(src_video)-1)// latent_size * latent_size +1 ]
-                        refresh_preview["video_guide"] = Image.fromarray(src_video[0].cpu().numpy())
-                        refresh_preview["video_mask"] = None
-                        src_video  = src_video.permute(3, 0, 1, 2)
-                        src_video  = src_video.float().div_(127.5).sub_(1.) # c, f, h, w
-                        if sample_fit_canvas != None:
-                            image_size = src_video.shape[-2:]
-                            sample_fit_canvas = None
-
-                elif hunyuan_custom_edit:
-                    if "P" in  video_prompt_type:
-                        progress_args = [0, get_latest_status(state,"Extracting Open Pose Information and Expanding Mask")]
+                # Generic Video Preprocessing
+                process_outside_mask = process_map_outside_mask.get(filter_letters(video_prompt_type, "YWX"), None)
+                preprocess_type, preprocess_type2 =  "raw", None 
+                for process_num, process_letter in enumerate( filter_letters(video_prompt_type, "PEDSLCMU")):
+                    if process_num == 0:
+                        preprocess_type = process_map_video_guide.get(process_letter, "raw")
                     else:
-                        progress_args = [0, get_latest_status(state,"Extracting Video and Mask")]
+                        preprocess_type2 = process_map_video_guide.get(process_letter, None)
+                status_info = "Extracting " + processes_names[preprocess_type]
+                extra_process_list = ([] if preprocess_type2==None else [preprocess_type2]) + ([] if process_outside_mask==None or process_outside_mask == preprocess_type else [process_outside_mask])
+                if len(extra_process_list) == 1:
+                    status_info += " and " + processes_names[extra_process_list[0]]
+                elif len(extra_process_list) == 2:
+                    status_info +=  ", " + processes_names[extra_process_list[0]] + " and " + processes_names[extra_process_list[1]]
+                context_scale = [control_net_weight /2, control_net_weight2 /2] if preprocess_type2 is not None else [control_net_weight]
+                if not (preprocess_type == "identity" and preprocess_type2 is None and video_mask is None):send_cmd("progress", [0, get_latest_status(state, status_info)])
+                inpaint_color = 0 if preprocess_type=="pose" and process_outside_mask == "inpaint" else guide_inpaint_color
+                video_guide_processed, video_mask_processed = preprocess_video_with_mask(video_guide if sparse_video_image is None else sparse_video_image, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =1, inpaint_color =inpaint_color, block_size = block_size )
+                if preprocess_type2 != None:
+                    video_guide_processed2, video_mask_processed2 = preprocess_video_with_mask(video_guide, video_mask, height=image_size[0], width = image_size[1], max_frames= guide_frames_extract_count, start_frame = guide_frames_extract_start, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps,  process_type = preprocess_type2, expand_scale = mask_expand, RGB_Mask = True, negate_mask = "N" in video_prompt_type, process_outside_mask = process_outside_mask, outpainting_dims = outpainting_dims, proc_no =2, block_size = block_size )
 
-                    send_cmd("progress", progress_args)
-                    src_video, src_mask = preprocess_video_with_mask(video_guide,  video_mask, height=height, width = width, max_frames= current_video_length if window_no == 1 else current_video_length - reuse_frames, start_frame = guide_start_frame, fit_canvas = sample_fit_canvas, fit_crop = fit_crop, target_fps = fps, process_type= "pose" if "P" in video_prompt_type else "inpaint", negate_mask = "N" in video_prompt_type, inpaint_color =0)
-                    refresh_preview["video_guide"] = Image.fromarray(src_video[0].cpu().numpy()) 
-                    if src_mask != None:                        
-                        refresh_preview["video_mask"] = Image.fromarray(src_mask[0].cpu().numpy())
-
-                elif "R" in video_prompt_type: # sparse video to video
-                    src_image = get_video_frame(video_guide, aligned_guide_start_frame, return_last_if_missing = True, return_PIL = True)
-                    src_image, _, _ = calculate_dimensions_and_resize_image(src_image, image_size[0], image_size[1  ], sample_fit_canvas, fit_crop, block_size = block_size)
-                    refresh_preview["video_guide"] = src_image  
-                    src_video = convert_image_to_tensor(src_image).unsqueeze(1)
-                    if sample_fit_canvas != None:  
-                        image_size  = src_video.shape[-2:]
-                        sample_fit_canvas = None
-
-                else: # video to video
-                    video_guide_processed = preprocess_video(width = image_size[1], height=image_size[0], video_in=video_guide, max_frames= len(keep_frames_parsed), start_frame = aligned_guide_start_frame, fit_canvas= sample_fit_canvas, fit_crop = fit_crop, target_fps = fps, block_size= block_size)
-                    if video_guide_processed is None:
-                        src_video = pre_video_guide
-                    else:
-                        if sample_fit_canvas != None:
-                            image_size = video_guide_processed.shape[-3: -1]
-                            sample_fit_canvas = None
-                        src_video = video_guide_processed.float().div_(127.5).sub_(1.).permute(-1,0,1,2)
-                        if pre_video_guide != None:
-                            src_video = torch.cat( [pre_video_guide, src_video], dim=1) 
-            elif image_guide is not None:
-                new_image_guide, new_image_mask = preprocess_image_with_mask(image_guide, image_mask, image_size[0], image_size[1], fit_canvas = sample_fit_canvas, fit_crop= fit_crop, block_size= block_size, expand_scale = mask_expand, outpainting_dims=outpainting_dims)
-                if sample_fit_canvas is not None:
-                    image_size = (new_image_guide.size[1], new_image_guide.size[0])
+                if video_guide_processed is not None  and sample_fit_canvas is not None:
+                    image_size = video_guide_processed.shape[-2:]
                     sample_fit_canvas = None
-                refresh_preview["image_guide"] = new_image_guide
-                if new_image_mask is not None:
-                    refresh_preview["image_mask"] = new_image_mask
 
             if window_no == 1 and image_refs is not None and len(image_refs) > 0:
                 if sample_fit_canvas is not None and (nb_frames_positions > 0 or "K" in video_prompt_type) :
@@ -5192,45 +5055,68 @@ def generate_video(
                             image_refs[i] = rescale_and_crop(img, default_image_size[1], default_image_size[0])
                         refresh_preview["image_refs"] = image_refs
 
-                    if len(image_refs) > nb_frames_positions:  
+                    if len(image_refs) > nb_frames_positions:
+                        src_ref_images = image_refs[nb_frames_positions:]
                         if remove_background_images_ref > 0:
                             send_cmd("progress", [0, get_latest_status(state, "Removing Images References Background")])
-                        # keep image ratios if there is a background image ref (we will let the model preprocessor decide what to do) but remove bg if requested
-                        image_refs[nb_frames_positions:], src_ref_masks  = resize_and_remove_background(image_refs[nb_frames_positions:] , image_size[1], image_size[0],
+
+                        src_ref_images, src_ref_masks  = resize_and_remove_background(src_ref_images , image_size[1], image_size[0],
                                                                                         remove_background_images_ref > 0, any_background_ref, 
-                                                                                        fit_into_canvas= 0 if (any_background_ref > 0 or model_def.get("lock_image_refs_ratios", False)) else 1,
+                                                                                        fit_into_canvas= model_def.get("fit_into_canvas_image_refs", 1),
                                                                                         block_size=block_size,
                                                                                         outpainting_dims =outpainting_dims,
-                                                                                        background_ref_outpainted = model_def.get("background_ref_outpainted", True) )
-                        refresh_preview["image_refs"] = image_refs
+                                                                                        background_ref_outpainted = model_def.get("background_ref_outpainted", True),
+                                                                                        return_tensor= model_def.get("return_image_refs_tensor", False) )
+ 
 
-
-            if vace :
-                image_refs_copy = image_refs[nb_frames_positions:].copy() if image_refs != None and len(image_refs) > nb_frames_positions else None # required since prepare_source do inplace modifications
-
-                src_video, src_mask, src_ref_images = wan_model.prepare_source([video_guide_processed] if video_guide_processed2 == None else [video_guide_processed, video_guide_processed2],
-                                                                        [video_mask_processed] if video_guide_processed2 == None else [video_mask_processed, video_mask_processed2],
-                                                                        [image_refs_copy] if video_guide_processed2 == None else [image_refs_copy, image_refs_copy], 
-                                                                        current_video_length, image_size = image_size, device ="cpu",
-                                                                        keep_video_guide_frames=keep_frames_parsed,
-                                                                        pre_src_video = [pre_video_guide] if video_guide_processed2 == None else [pre_video_guide, pre_video_guide],
-                                                                        inject_frames= frames_to_inject_parsed,
-                                                                        outpainting_dims = outpainting_dims,
-                                                                        any_background_ref = any_background_ref
-                                                                        )
-                if len(frames_to_inject_parsed) or any_background_ref:
-                    new_image_refs = [convert_tensor_to_image(src_video[0], frame_no + 0 if extract_guide_from_window_start else (aligned_guide_start_frame - aligned_window_start_frame) ) for frame_no, inject in enumerate(frames_to_inject_parsed) if inject]
-                    if any_background_ref:
-                        new_image_refs +=  [convert_tensor_to_image(image_refs_copy[0], 0)] + image_refs[nb_frames_positions+1:]
+            frames_to_inject_parsed = frames_to_inject[ window_start_frame if extract_guide_from_window_start else guide_start_frame: guide_end_frame]
+            if video_guide is not None or len(frames_to_inject_parsed) > 0 or model_def.get("forced_guide_mask_inputs", False): 
+                any_mask = video_mask is not None or model_def.get("forced_guide_mask_inputs", False)
+                any_guide_padding = model_def.get("pad_guide_video", False)
+                from shared.utils.utils import prepare_video_guide_and_mask
+                src_videos, src_masks = prepare_video_guide_and_mask(   [video_guide_processed] + ([] if video_guide_processed2 is None else [video_guide_processed2]), 
+                                                                        [video_mask_processed] + ([] if video_mask_processed2 is None else [video_mask_processed2]),
+                                                                        None if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else pre_video_guide, 
+                                                                        image_size, current_video_length, latent_size,
+                                                                        any_mask, any_guide_padding, guide_inpaint_color, 
+                                                                        keep_frames_parsed, frames_to_inject_parsed , outpainting_dims)
+                video_guide_processed = video_guide_processed2 = video_mask_processed = video_mask_processed2 = None
+                if len(src_videos) == 1:
+                    src_video, src_video2, src_mask, src_mask2 = src_videos[0], None, src_masks[0], None 
+                else:
+                    src_video, src_video2 = src_videos 
+                    src_mask, src_mask2 = src_masks 
+                src_videos = src_masks = None
+                if src_video is None:
+                    abort = True 
+                    break
+                if src_faces is not None:
+                    if src_faces.shape[1] < src_video.shape[1]:
+                        src_faces = torch.concat( [src_faces,  src_faces[:, -1:].repeat(1, src_video.shape[1] - src_faces.shape[1], 1,1)], dim =1)
                     else:
-                        new_image_refs +=  image_refs[nb_frames_positions:]
-                    refresh_preview["image_refs"] = new_image_refs
-                    new_image_refs = None
+                        src_faces = src_faces[:, :src_video.shape[1]]
+                if video_guide is not None or len(frames_to_inject_parsed) > 0:
+                    if args.save_masks:
+                        if src_video is not None: save_video( src_video, "masked_frames.mp4", fps)
+                        if src_video2 is not None: save_video( src_video2, "masked_frames2.mp4", fps)
+                        if any_mask: save_video( src_mask, "masks.mp4", fps, value_range=(0, 1))
+                if video_guide is not None:                        
+                    preview_frame_no = 0 if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else (guide_start_frame - window_start_frame) 
+                    refresh_preview["video_guide"] = convert_tensor_to_image(src_video, preview_frame_no)
+                    if src_video2 is not None:
+                        refresh_preview["video_guide"] = [refresh_preview["video_guide"], convert_tensor_to_image(src_video2, preview_frame_no)] 
+                    if src_mask is not None and video_mask is not None:                        
+                        refresh_preview["video_mask"] = convert_tensor_to_image(src_mask, preview_frame_no, mask_levels = True)
 
-                if sample_fit_canvas != None:
-                    image_size = src_video[0].shape[-2:]
-                    sample_fit_canvas = None
-
+            if src_ref_images is not None or nb_frames_positions:
+                if len(frames_to_inject_parsed):
+                    new_image_refs = [convert_tensor_to_image(src_video, frame_no + (0 if extract_guide_from_window_start else (aligned_guide_start_frame - aligned_window_start_frame)) ) for frame_no, inject in enumerate(frames_to_inject_parsed) if inject]
+                else:
+                    new_image_refs = []
+                if src_ref_images is not None:
+                    new_image_refs +=  [convert_tensor_to_image(img) if torch.is_tensor(img) else img for img in src_ref_images  ]
+                refresh_preview["image_refs"] = new_image_refs
+                new_image_refs = None
 
             if len(refresh_preview) > 0:
                 new_inputs= locals()
@@ -5339,8 +5225,6 @@ def generate_video(
                     pre_video_frame = pre_video_frame,
                     original_input_ref_images = original_image_refs[nb_frames_positions:] if original_image_refs is not None else [],
                     image_refs_relative_size = image_refs_relative_size,
-                    image_guide= new_image_guide,
-                    image_mask= new_image_mask,
                     outpainting_dims = outpainting_dims,
                 )
             except Exception as e:
@@ -6320,8 +6204,11 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
             pop += ["image_refs_relative_size"]
 
     if not vace:
-        pop += ["frames_positions", "video_guide_outpainting", "control_net_weight", "control_net_weight2"] 
+        pop += ["frames_positions", "control_net_weight", "control_net_weight2"] 
                 
+    if model_def.get("video_guide_outpainting", None) is None:
+        pop += ["video_guide_outpainting"] 
+
     if not (vace or t2v):
         pop += ["min_frames_if_references"]
 
@@ -6506,13 +6393,6 @@ def eject_video_from_gallery(state, input_file_list, choice):
         choice = min(choice, len(file_list))
     return gr.Gallery(value = file_list, selected_index= choice), gr.update() if len(file_list) >0 else get_default_video_info(), gr.Row(visible= len(file_list) > 0)
 
-def has_video_file_extension(filename):
-    extension = os.path.splitext(filename)[-1].lower()
-    return extension in [".mp4"]
-
-def has_image_file_extension(filename):
-    extension = os.path.splitext(filename)[-1].lower()
-    return extension in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg"]
 def add_videos_to_gallery(state, input_file_list, choice, files_to_load):
     gen = get_gen_info(state)
     if files_to_load == None:
@@ -7881,7 +7761,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 elif recammaster:
                     video_length = gr.Slider(5, 193, value=ui_defaults.get("video_length", get_max_frames(81)), step=4, label="Number of frames (16 = 1s), locked", interactive= False, visible = True)
                 else:
-                    min_frames, frames_step = get_model_min_frames_and_step(base_model_type)
+                    min_frames, frames_step, _ = get_model_min_frames_and_step(base_model_type)
                     
                     current_video_length = ui_defaults.get("video_length", 81 if get_model_family(base_model_type)=="wan" else 97)
 
@@ -8059,7 +7939,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             MMAudio_neg_prompt = gr.Text(ui_defaults.get("MMAudio_neg_prompt", ""), label="Negative Prompt (1 or 2 keywords)")
                             
 
-                    with gr.Column(visible = (t2v or vace) and not fantasy) as audio_prompt_type_remux_row:
+                    with gr.Column(visible = any_control_video) as audio_prompt_type_remux_row:
                         gr.Markdown("<B>You may transfer the existing audio tracks of a Control Video</B>")
                         audio_prompt_type_remux = gr.Dropdown(
                             choices=[
@@ -8284,16 +8164,16 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         video_info = gr.HTML(visible=True, min_height=100, value=get_default_video_info()) 
                         with gr.Row(**default_visibility) as video_buttons_row:
                             video_info_extract_settings_btn = gr.Button("Extract Settings", min_width= 1, size ="sm")
-                            video_info_to_control_video_btn = gr.Button("To Control Video", min_width= 1, size ="sm", visible = any_control_video )
                             video_info_to_video_source_btn = gr.Button("To Video Source", min_width= 1, size ="sm", visible = any_video_source)
+                            video_info_to_control_video_btn = gr.Button("To Control Video", min_width= 1, size ="sm", visible = any_control_video )
                             video_info_eject_video_btn = gr.Button("Eject Video", min_width= 1, size ="sm")
                         with gr.Row(**default_visibility) as image_buttons_row:
                             video_info_extract_image_settings_btn = gr.Button("Extract Settings", min_width= 1, size ="sm")
                             video_info_to_start_image_btn = gr.Button("To Start Image", size ="sm", min_width= 1, visible = any_start_image )
                             video_info_to_end_image_btn = gr.Button("To End Image", size ="sm", min_width= 1, visible = any_end_image)
-                            video_info_to_image_guide_btn = gr.Button("To Control Image", min_width= 1, size ="sm", visible = any_control_image )
                             video_info_to_image_mask_btn = gr.Button("To Mask Image", min_width= 1, size ="sm", visible = any_image_mask and False)
                             video_info_to_reference_image_btn = gr.Button("To Reference Image", min_width= 1, size ="sm", visible = any_reference_image)
+                            video_info_to_image_guide_btn = gr.Button("To Control Image", min_width= 1, size ="sm", visible = any_control_image )
                             video_info_eject_image_btn = gr.Button("Eject Image", min_width= 1, size ="sm")
                     with gr.Tab("Post Processing", id= "post_processing", visible = True) as video_postprocessing_tab:
                         with gr.Group(elem_classes= "postprocess"):

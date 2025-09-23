@@ -114,7 +114,6 @@ class family_handler():
         "tea_cache" : not (base_model_type in ["i2v_2_2"] or test_wan_5B(base_model_type) or multiple_submodels),
         "mag_cache" : True,
         "keep_frames_video_guide_not_supported": base_model_type in ["infinitetalk"],
-        "convert_image_guide_to_video" : True,
         "sample_solvers":[
                             ("unipc", "unipc"),
                             ("euler", "euler"),
@@ -175,6 +174,8 @@ class family_handler():
             extra_model_def["forced_guide_mask_inputs"] = True
             extra_model_def["background_removal_label"]= "Remove Backgrounds behind People (Animate Mode Only)"
             extra_model_def["background_ref_outpainted"] = False
+            extra_model_def["return_image_refs_tensor"] = True
+            extra_model_def["guide_inpaint_color"] = 0
 
 
 
@@ -196,15 +197,15 @@ class family_handler():
                     "letters_filter":  "KFI",
             }
 
-            extra_model_def["lock_image_refs_ratios"] = True
             extra_model_def["background_removal_label"]= "Remove Backgrounds behind People / Objects, keep it for Landscape or Positioned Frames"
             extra_model_def["video_guide_outpainting"] = [0,1]
             extra_model_def["pad_guide_video"] = True
             extra_model_def["guide_inpaint_color"] = 127.5
             extra_model_def["forced_guide_mask_inputs"] = True
+            extra_model_def["return_image_refs_tensor"] = True
             
         if base_model_type in ["standin"]: 
-            extra_model_def["lock_image_refs_ratios"] = True
+            extra_model_def["fit_into_canvas_image_refs"] = 0
             extra_model_def["image_ref_choices"] = {
                 "choices": [
                     ("No Reference Image", ""),
@@ -480,6 +481,7 @@ class family_handler():
             ui_defaults.update({
                 "video_prompt_type": "PVBXAKI", 
                 "mask_expand": 20,
+                "audio_prompt_type_value": "R",
             })
 
         if text_oneframe_overlap(base_model_type):
