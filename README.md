@@ -20,7 +20,7 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 **Follow DeepBeepMeep on Twitter/X to get the Latest News**: https://x.com/deepbeepmeep
 
 ## 🔥 Latest Updates : 
-### September 23 2025: WanGP v8.7 - Here Are Two New Contenders in the Vace Arena !
+### September 24 2025: WanGP v8.72 - Here Are ~~Two~~Three New Contenders in the Vace Arena !
 
 So in today's release you will find two Wannabe Vace that covers each only a subset of Vace features but offers some interesting advantages:
 - **Wan 2.2 Animate**: this model is specialized in *Body Motion* and *Facial Motion transfers*. It does that very well. You can either *Replace* a person in a Video or *Animate* the person of your choice using an existing *Pose Video* (remember *Animate Anyone* ?). By default it will keep the original soundtrack. *Wan 2.2 Animate* seems to be under the hood a derived i2v model and should support the corresponding Loras Accelerators (for instance *FusioniX i2v*). Also as a WanGP exclusivity, you will find support for *Outpainting*.
@@ -29,7 +29,11 @@ In order to use Wan 2.2 Animate you will need first to stop by the *Mat Anyone* 
 
 - **Lucy Edit**: this one claims to be a *Nano Banana* for Videos. Give it a video and asks it to change it (it is specialized in clothes changing) and voila ! The nice thing about it is that is it based on the *Wan 2.2 5B* model and therefore is very fast especially if you the *FastWan* finetune that is also part of the package.
 
+Also because I wanted to spoil you:
+- **Qwen Edit Plus**: also known as the *Qwen Edit 25th September Update* which is specialized in combining multiple Objects / People. There is also a new support for *Pose transfer* & *Recolorisation*. All of this made easy to use in WanGP. You will find right now only the quantized version since HF crashes when uploading the unquantized version.
+
 *Update 8.71*: fixed Fast Lucy Edit that didnt contain the lora
+*Update 8.72*: shadow drop of Qwen Edit Plus
 
 ### September 15 2025: WanGP v8.6 - Attack of the Clones
 
