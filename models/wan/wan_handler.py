@@ -481,7 +481,7 @@ class family_handler():
             ui_defaults.update({
                 "video_prompt_type": "PVBXAKI", 
                 "mask_expand": 20,
-                "audio_prompt_type_value": "R",
+                "audio_prompt_type": "R",
             })
 
         if text_oneframe_overlap(base_model_type):
