@@ -5075,7 +5075,7 @@ def generate_video(
                 any_guide_padding = model_def.get("pad_guide_video", False)
                 from shared.utils.utils import prepare_video_guide_and_mask
                 src_videos, src_masks = prepare_video_guide_and_mask(   [video_guide_processed] + ([] if video_guide_processed2 is None else [video_guide_processed2]), 
-                                                                        [video_mask_processed] + ([] if video_mask_processed2 is None else [video_mask_processed2]),
+                                                                        [video_mask_processed] + ([] if video_guide_processed2 is None else [video_mask_processed2]),
                                                                         None if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else pre_video_guide, 
                                                                         image_size, current_video_length, latent_size,
                                                                         any_mask, any_guide_padding, guide_inpaint_color, 
@@ -5097,9 +5097,12 @@ def generate_video(
                         src_faces = src_faces[:, :src_video.shape[1]]
                 if video_guide is not None or len(frames_to_inject_parsed) > 0:
                     if args.save_masks:
-                        if src_video is not None: save_video( src_video, "masked_frames.mp4", fps)
-                        if src_video2 is not None: save_video( src_video2, "masked_frames2.mp4", fps)
-                        if any_mask: save_video( src_mask, "masks.mp4", fps, value_range=(0, 1))
+                        if src_video is not None: 
+                            save_video( src_video, "masked_frames.mp4", fps)
+                            if any_mask: save_video( src_mask, "masks.mp4", fps, value_range=(0, 1))
+                        if src_video2 is not None: 
+                            save_video( src_video2, "masked_frames2.mp4", fps)
+                            if any_mask: save_video( src_mask2, "masks2.mp4", fps, value_range=(0, 1))
                 if video_guide is not None:                        
                     preview_frame_no = 0 if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else (guide_start_frame - window_start_frame) 
                     refresh_preview["video_guide"] = convert_tensor_to_image(src_video, preview_frame_no)
