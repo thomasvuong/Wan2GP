@@ -129,6 +129,7 @@ class family_handler():
                 "model_mode" : 0,
             })
 
+    @staticmethod
     def validate_generative_settings(base_model_type, model_def, inputs):
         if base_model_type in ["qwen_image_edit_20B", "qwen_image_edit_plus_20B"]:
             model_mode = inputs["model_mode"]
@@ -141,3 +142,9 @@ class family_handler():
                 gr.Info("Denoising Strength will be ignored while using Lora Inpainting")
             if outpainting_dims is not None and model_mode == 0 :
                 return "Outpainting is not supported with Masked Denoising  "
+            
+    @staticmethod
+    def get_rgb_factors(base_model_type ):
+        from shared.RGB_factors import get_rgb_factors
+        latent_rgb_factors, latent_rgb_factors_bias = get_rgb_factors("qwen")
+        return latent_rgb_factors, latent_rgb_factors_bias

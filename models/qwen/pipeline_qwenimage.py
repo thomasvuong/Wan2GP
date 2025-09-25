@@ -971,8 +971,9 @@ class QwenImagePipeline(): #DiffusionPipeline
                     latents = latents.to(latents_dtype)
 
             if callback is not None:
-                # preview = unpack_latent(img).transpose(0,1)
-                callback(i, None, False)         
+                preview = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+                preview = preview.squeeze(0)
+                callback(i, preview, False)         
 
 
         self._current_timestep = None

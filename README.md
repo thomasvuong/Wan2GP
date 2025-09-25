@@ -20,7 +20,7 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 **Follow DeepBeepMeep on Twitter/X to get the Latest News**: https://x.com/deepbeepmeep
 
 ## 🔥 Latest Updates : 
-### September 24 2025: WanGP v8.72 - Here Are ~~Two~~Three New Contenders in the Vace Arena !
+### September 25 2025: WanGP v8.73 - Here Are ~~Two~~Three New Contenders in the Vace Arena !
 
 So in today's release you will find two Wannabe Vace that covers each only a subset of Vace features but offers some interesting advantages:
 - **Wan 2.2 Animate**: this model is specialized in *Body Motion* and *Facial Motion transfers*. It does that very well. You can use this model to either *Replace* a person in an in Video or *Animate* the person of your choice using an existing *Pose Video* (remember *Animate Anyone* ?). By default it will keep the original soundtrack. *Wan 2.2 Animate* seems to be under the hood a derived i2v model and should support the corresponding Loras Accelerators (for instance *FusioniX t2v*). Also as a WanGP exclusivity, you will find support for *Outpainting*.
@@ -34,6 +34,7 @@ Also because I wanted to spoil you:
 
 *Update 8.71*: fixed Fast Lucy Edit that didnt contain the lora
 *Update 8.72*: shadow drop of Qwen Edit Plus
+*Update 8.73*: Qwen Preview & InfiniteTalk Start image 
 
 ### September 15 2025: WanGP v8.6 - Attack of the Clones
 
