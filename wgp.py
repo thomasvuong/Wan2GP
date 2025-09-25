@@ -2519,6 +2519,7 @@ def download_mmaudio():
         }
         process_files_def(**enhancer_def)
 
+download_shared_done = False
 def download_models(model_filename = None, model_type= None, module_type = False, submodel_no = 1):
     def computeList(filename):
         if filename == None:
@@ -2536,7 +2537,7 @@ def download_models(model_filename = None, model_type= None, module_type = False
         "repoId" : "DeepBeepMeep/Wan2.1",
         "sourceFolderList" : [ "pose", "scribble", "flow", "depth", "mask", "wav2vec", "chinese-wav2vec2-base", "roformer", "pyannote", "det_align", "" ],
         "fileList" : [ ["dw-ll_ucoco_384.onnx", "yolox_l.onnx"],["netG_A_latest.pth"],  ["raft-things.pth"], 
-                      ["depth_anything_v2_vitl.pth","depth_anything_v2_vitb.pth"], ["sam_vit_h_4b8939_fp16.safetensors"], 
+                      ["depth_anything_v2_vitl.pth","depth_anything_v2_vitb.pth"], ["sam_vit_h_4b8939_fp16.safetensors", "model.safetensors", "config.json"], 
                       ["config.json", "feature_extractor_config.json", "model.safetensors", "preprocessor_config.json", "special_tokens_map.json", "tokenizer_config.json", "vocab.json"],
                       ["config.json", "pytorch_model.bin", "preprocessor_config.json"],
                       ["model_bs_roformer_ep_317_sdr_12.9755.ckpt", "model_bs_roformer_ep_317_sdr_12.9755.yaml", "download_checks.json"],
@@ -2562,6 +2563,9 @@ def download_models(model_filename = None, model_type= None, module_type = False
         process_files_def(**enhancer_def)
 
     download_mmaudio()
+    global download_shared_done
+    download_shared_done = True
+
     if model_filename is None: return
 
     def download_file(url,filename):
@@ -9138,6 +9142,8 @@ def set_new_tab(tab_state, new_tab_no):
             tab_state["tab_no"] = 0
             return gr.Tabs(selected="video_gen") 
         else:
+            if not download_shared_done:
+                download_models()
             vmc_event_handler(True)
     tab_state["tab_no"] = new_tab_no
     return gr.Tabs() 
