@@ -122,7 +122,9 @@ See full changelog: **[Changelog](docs/CHANGELOG.md)**
 
 ## 🚀 Quick Start
 
-**One-click installation:** Get started instantly with [Pinokio App](https://pinokio.computer/)
+**One-click installation:** 
+- Get started instantly with [Pinokio App](https://pinokio.computer/)
+- Use Redtash1 [One Click Install with Sage](https://github.com/Redtash1/Wan2GP-Windows-One-Click-Install-With-Sage)
 
 **Manual installation:**
 ```bash
@@ -136,8 +138,7 @@ pip install -r requirements.txt
 
 **Run the application:**
 ```bash
-python wgp.py  # Text-to-video (default)
-python wgp.py --i2v  # Image-to-video
+python wgp.py
 ```
 
 **Update the application:**
