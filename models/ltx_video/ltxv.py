@@ -300,9 +300,6 @@ class LTXV:
             prefix_size, height, width = input_video.shape[-3:]
         else:
             if image_start != None:
-                frame_width, frame_height  = image_start.size
-                if fit_into_canvas != None:
-                    height, width = calculate_new_dimensions(height, width, frame_height, frame_width, fit_into_canvas, 32)
                 conditioning_media_paths.append(image_start.unsqueeze(1)) 
                 conditioning_start_frames.append(0)
                 conditioning_control_frames.append(False)
@@ -479,14 +476,14 @@ class LTXV:
         images = images.sub_(0.5).mul_(2).squeeze(0)
         return images
 
-    def get_loras_transformer(self, get_model_recursive_prop, video_prompt_type, **kwargs):
+    def get_loras_transformer(self, get_model_recursive_prop, model_type, video_prompt_type, **kwargs):
         map = {
             "P" : "pose",
             "D" : "depth",
             "E" : "canny",
         }
         loras = []
-        preloadURLs = get_model_recursive_prop(self.model_type,  "preload_URLs")
+        preloadURLs = get_model_recursive_prop(model_type,  "preload_URLs")
         lora_file_name = ""
         for letter, signature in map.items():
             if letter in video_prompt_type:

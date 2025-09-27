@@ -12,28 +12,16 @@ from diffusers.models.modeling_utils import ModelMixin
 import numpy as np
 from typing import Union,Optional
 from mmgp import offload
+from mmgp.offload import get_cache, clear_caches
 from shared.attention import pay_attention
 from torch.backends.cuda import sdp_kernel
 from ..multitalk.multitalk_utils import get_attn_map_with_target
+from ..animate.motion_encoder import Generator
+from ..animate.face_blocks import FaceAdapter, FaceEncoder 
+from ..animate.model_animate import after_patch_embedding
 
 __all__ = ['WanModel']
 
-
-def get_cache(cache_name):
-    all_cache = offload.shared_state.get("_cache",  None)
-    if all_cache is None:
-        all_cache = {}
-        offload.shared_state["_cache"]=  all_cache
-    cache = offload.shared_state.get(cache_name, None)
-    if cache is None:
-        cache = {}
-        offload.shared_state[cache_name] = cache
-    return cache
-
-def clear_caches():
-    all_cache = offload.shared_state.get("_cache",  None)
-    if all_cache is not None:
-        all_cache.clear()
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -514,6 +502,7 @@ class WanAttentionBlock(nn.Module):
         multitalk_masks=None,
         ref_images_count=0,
         standin_phase=-1,
+        motion_vec = None,
     ):
         r"""
         Args:
@@ -579,19 +568,23 @@ class WanAttentionBlock(nn.Module):
             y = self.norm_x(x)
             y = y.to(attention_dtype)
             if ref_images_count == 0:
-                x += self.audio_cross_attn(y, encoder_hidden_states=multitalk_audio, shape=grid_sizes, x_ref_attn_map=x_ref_attn_map)
+                ylist= [y]
+                del y
+                x += self.audio_cross_attn(ylist, encoder_hidden_states=multitalk_audio, shape=grid_sizes, x_ref_attn_map=x_ref_attn_map)
             else:
                 y_shape = y.shape
                 y = y.reshape(y_shape[0], grid_sizes[0], -1)
                 y = y[:, ref_images_count:]
                 y = y.reshape(y_shape[0], -1, y_shape[-1])
                 grid_sizes_alt = [grid_sizes[0]-ref_images_count, *grid_sizes[1:]]
-                y = self.audio_cross_attn(y, encoder_hidden_states=multitalk_audio, shape=grid_sizes_alt, x_ref_attn_map=x_ref_attn_map)
+                ylist= [y]
+                y = None
+                y = self.audio_cross_attn(ylist, encoder_hidden_states=multitalk_audio, shape=grid_sizes_alt, x_ref_attn_map=x_ref_attn_map)
                 y = y.reshape(y_shape[0], grid_sizes[0]-ref_images_count, -1)
                 x = x.reshape(y_shape[0], grid_sizes[0], -1)
                 x[:, ref_images_count:] += y
                 x = x.reshape(y_shape[0], -1, y_shape[-1])
-            del y
+                del y
 
         y = self.norm2(x)
 
@@ -627,6 +620,10 @@ class WanAttentionBlock(nn.Module):
                         x.add_(hint)
                     else:
                         x.add_(hint, alpha= scale)
+
+        if motion_vec is not None and self.block_no % 5 == 0:
+            x += self.face_adapter_fuser_blocks(x.to(self.face_adapter_fuser_blocks.linear1_kv.weight.dtype), motion_vec, None, False)
+
         return x 
 
 class AudioProjModel(ModelMixin, ConfigMixin):
@@ -909,6 +906,7 @@ class WanModel(ModelMixin, ConfigMixin):
                  norm_input_visual=True,
                  norm_output_audio=True,
                  standin= False,
+                 motion_encoder_dim=0,
                  ):
 
         super().__init__()
@@ -933,14 +931,15 @@ class WanModel(ModelMixin, ConfigMixin):
         self.flag_causal_attention = False
         self.block_mask = None
         self.inject_sample_info = inject_sample_info
-
+        self.motion_encoder_dim = motion_encoder_dim
         self.norm_output_audio = norm_output_audio
         self.audio_window = audio_window
         self.intermediate_dim = intermediate_dim
         self.vae_scale = vae_scale
 
         multitalk = multitalk_output_dim > 0
-        self.multitalk = multitalk
+        self.multitalk = multitalk 
+        animate = motion_encoder_dim > 0
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
@@ -1037,6 +1036,25 @@ class WanModel(ModelMixin, ConfigMixin):
                 block.self_attn.q_loras = LoRALinearLayer(dim, dim, rank=128)
                 block.self_attn.k_loras = LoRALinearLayer(dim, dim, rank=128)
                 block.self_attn.v_loras = LoRALinearLayer(dim, dim, rank=128)
+
+        if animate:
+            self.pose_patch_embedding = nn.Conv3d(
+                16, dim, kernel_size=patch_size, stride=patch_size
+            )
+
+            self.motion_encoder = Generator(size=512, style_dim=512, motion_dim=20)
+            self.face_adapter = FaceAdapter(
+                heads_num=self.num_heads,
+                hidden_dim=self.dim,
+                num_adapter_layers=self.num_layers // 5,
+            )
+
+            self.face_encoder = FaceEncoder(
+                in_dim=motion_encoder_dim,
+                hidden_dim=self.dim,
+                num_heads=4,
+            )
+
 
     def lock_layers_dtypes(self, hybrid_dtype = None, dtype = torch.float32):
         layer_list = [self.head, self.head.head, self.patch_embedding]
@@ -1202,7 +1220,8 @@ class WanModel(ModelMixin, ConfigMixin):
         y=None,
         freqs = None,
         pipeline = None,
-        current_step = 0,
+        current_step_no = 0,
+        real_step_no = 0,
         x_id= 0,
         max_steps = 0, 
         slg_layers=None,
@@ -1219,6 +1238,9 @@ class WanModel(ModelMixin, ConfigMixin):
         ref_images_count = 0,
         standin_freqs = None,
         standin_ref = None,
+        pose_latents=None, 
+        face_pixel_values=None,
+
     ):
         # patch_dtype =  self.patch_embedding.weight.dtype
         modulation_dtype = self.time_projection[1].weight.dtype
@@ -1251,9 +1273,18 @@ class WanModel(ModelMixin, ConfigMixin):
                     if bz > 1: y = y.expand(bz, -1, -1, -1, -1)
                     x = torch.cat([x, y], dim=1)
                 # embeddings
-                # x = self.patch_embedding(x.unsqueeze(0)).to(modulation_dtype)
                 x = self.patch_embedding(x).to(modulation_dtype)
                 grid_sizes = x.shape[2:]
+                x_list[i] = x
+        y = None
+        
+        motion_vec_list = []
+        for i, x in enumerate(x_list):
+                # animate embeddings
+                motion_vec = None
+                if pose_latents is not None: 
+                    x, motion_vec = after_patch_embedding(self, x, pose_latents, face_pixel_values)
+                motion_vec_list.append(motion_vec)
                 if chipmunk:
                     x = x.unsqueeze(-1)
                     x_og_shape = x.shape
@@ -1261,7 +1292,7 @@ class WanModel(ModelMixin, ConfigMixin):
                 else:
                     x = x.flatten(2).transpose(1, 2)
                 x_list[i] = x
-        x, y = None, None
+        x = None
 
 
         block_mask = None
@@ -1280,9 +1311,9 @@ class WanModel(ModelMixin, ConfigMixin):
             del causal_mask
 
         offload.shared_state["embed_sizes"] = grid_sizes 
-        offload.shared_state["step_no"] = current_step 
+        offload.shared_state["step_no"] = real_step_no 
         offload.shared_state["max_steps"] = max_steps
-        if current_step == 0 and x_id == 0: clear_caches()
+        if current_step_no == 0 and x_id == 0: clear_caches()
         # arguments
 
         kwargs = dict(
@@ -1306,7 +1337,7 @@ class WanModel(ModelMixin, ConfigMixin):
         if standin_ref is not None:
             standin_cache_enabled = False
             kwargs["standin_phase"] = 2
-            if (current_step == 0 or not standin_cache_enabled) and x_id == 0:
+            if current_step_no == 0 or not standin_cache_enabled :
                 standin_x = self.patch_embedding(standin_ref).to(modulation_dtype).flatten(2).transpose(1, 2)
                 standin_e = self.time_embedding( sinusoidal_embedding_1d(self.freq_dim, torch.zeros_like(t)).to(modulation_dtype) )
                 standin_e0 = self.time_projection(standin_e).unflatten(1, (6, self.dim)).to(e.dtype)
@@ -1371,7 +1402,7 @@ class WanModel(ModelMixin, ConfigMixin):
         skips_steps_cache = self.cache
         if skips_steps_cache != None: 
             if skips_steps_cache.cache_type == "mag":
-                if current_step <= skips_steps_cache.start_step:
+                if real_step_no <= skips_steps_cache.start_step:
                     should_calc = True
                 elif skips_steps_cache.one_for_all and x_id != 0: # not joint pass, not main pas, one for all
                     assert len(x_list) == 1
@@ -1380,7 +1411,7 @@ class WanModel(ModelMixin, ConfigMixin):
                     x_should_calc = []
                     for i in range(1 if skips_steps_cache.one_for_all else len(x_list)):
                         cur_x_id = i if joint_pass else x_id  
-                        cur_mag_ratio = skips_steps_cache.mag_ratios[current_step * 2 + cur_x_id] # conditional and unconditional in one list
+                        cur_mag_ratio = skips_steps_cache.mag_ratios[real_step_no * 2 + cur_x_id] # conditional and unconditional in one list
                         skips_steps_cache.accumulated_ratio[cur_x_id] *= cur_mag_ratio # magnitude ratio between current step and the cached step
                         skips_steps_cache.accumulated_steps[cur_x_id] += 1 # skip steps plus 1
                         cur_skip_err = np.abs(1-skips_steps_cache.accumulated_ratio[cur_x_id]) # skip error of current steps
@@ -1400,7 +1431,7 @@ class WanModel(ModelMixin, ConfigMixin):
                 if x_id != 0:
                     should_calc = skips_steps_cache.should_calc
                 else:
-                    if current_step <= skips_steps_cache.start_step or current_step == skips_steps_cache.num_steps-1:
+                    if real_step_no <= skips_steps_cache.start_step or real_step_no == skips_steps_cache.num_steps-1:
                         should_calc = True
                         skips_steps_cache.accumulated_rel_l1_distance = 0
                     else:
@@ -1453,7 +1484,7 @@ class WanModel(ModelMixin, ConfigMixin):
                     return [None] * len(x_list)
 
                 if standin_x is not None:
-                    if not standin_cache_enabled and x_id ==0 : get_cache("standin").clear()
+                    if not standin_cache_enabled: get_cache("standin").clear()
                     standin_x = block(standin_x, context = None, grid_sizes = None, e= standin_e0, freqs = standin_freqs, standin_phase = 1)
 
                 if slg_layers is not None and block_idx in slg_layers:
@@ -1461,9 +1492,9 @@ class WanModel(ModelMixin, ConfigMixin):
                         continue
                     x_list[0] = block(x_list[0], context = context_list[0], audio_scale= audio_scale_list[0], e= e0, **kwargs)
                 else:
-                    for i, (x, context, hints, audio_scale, multitalk_audio, multitalk_masks, should_calc) in enumerate(zip(x_list, context_list, hints_list, audio_scale_list, multitalk_audio_list, multitalk_masks_list, x_should_calc)):
+                    for i, (x, context, hints, audio_scale, multitalk_audio, multitalk_masks, should_calc, motion_vec) in enumerate(zip(x_list, context_list, hints_list, audio_scale_list, multitalk_audio_list, multitalk_masks_list, x_should_calc,motion_vec_list)):
                         if should_calc:
-                            x_list[i] = block(x, context = context, hints= hints, audio_scale= audio_scale, multitalk_audio = multitalk_audio, multitalk_masks =multitalk_masks, e= e0, **kwargs)
+                            x_list[i] = block(x, context = context, hints= hints, audio_scale= audio_scale, multitalk_audio = multitalk_audio, multitalk_masks =multitalk_masks, e= e0,  motion_vec = motion_vec,**kwargs)
                             del x
                     context = hints = audio_embedding  = None
 

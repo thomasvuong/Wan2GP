@@ -24,7 +24,19 @@ class family_handler():
         extra_model_def["frames_minimum"] = 17
         extra_model_def["frames_steps"] = 8
         extra_model_def["sliding_window"] = True
+        extra_model_def["image_prompt_types_allowed"] = "TSEV"
 
+        extra_model_def["guide_preprocessing"] = {
+            "selection": ["", "PV", "DV", "EV", "V"],
+            "labels" : { "V": "Use LTXV raw format"}
+        }
+
+        extra_model_def["mask_preprocessing"] = {
+            "selection": ["", "A", "NA", "XA", "XNA"],
+        }
+
+        extra_model_def["extra_control_frames"] = 1
+        extra_model_def["dont_cat_preguide"]= True
         return extra_model_def
 
     @staticmethod
@@ -64,7 +76,7 @@ class family_handler():
 
 
     @staticmethod
-    def load_model(model_filename, model_type, base_model_type, model_def, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False):
+    def load_model(model_filename, model_type, base_model_type, model_def, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False, submodel_no_list = None):
         from .ltxv import LTXV
 
         ltxv_model = LTXV(

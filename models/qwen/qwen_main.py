@@ -17,7 +17,7 @@ from .autoencoder_kl_qwenimage import AutoencoderKLQwenImage
 from diffusers import FlowMatchEulerDiscreteScheduler
 from .pipeline_qwenimage import QwenImagePipeline
 from PIL import Image
-from shared.utils.utils import calculate_new_dimensions
+from shared.utils.utils import calculate_new_dimensions, convert_tensor_to_image
 
 def stitch_images(img1, img2):
     # Resize img2 to match img1's height
@@ -44,17 +44,17 @@ class model_factory():
         save_quantized = False,
         dtype = torch.bfloat16,
         VAE_dtype = torch.float32,
-        mixed_precision_transformer = False
+        mixed_precision_transformer = False,
     ):
     
 
         transformer_filename = model_filename[0]
         processor = None
         tokenizer = None
-        if base_model_type == "qwen_image_edit_20B":
+        if base_model_type in ["qwen_image_edit_20B", "qwen_image_edit_plus_20B"]:
             processor = Qwen2VLProcessor.from_pretrained(os.path.join(checkpoint_dir,"Qwen2.5-VL-7B-Instruct"))
         tokenizer = AutoTokenizer.from_pretrained(os.path.join(checkpoint_dir,"Qwen2.5-VL-7B-Instruct"))
-
+        self.base_model_type = base_model_type
 
         base_config_file = "configs/qwen_image_20B.json" 
         with open(base_config_file, 'r', encoding='utf-8') as f:
@@ -103,6 +103,8 @@ class model_factory():
         n_prompt = None,
         sampling_steps: int = 20,
         input_ref_images = None,
+        input_frames= None,
+        input_masks= None,
         width= 832,
         height=480,
         guide_scale: float = 4,
@@ -114,6 +116,9 @@ class model_factory():
         VAE_tile_size = None, 
         joint_pass = True,
         sample_solver='default',
+        denoising_strength = 1.,
+        model_mode = 0,
+        outpainting_dims = None,
         **bbargs
     ):
         # Generate with different aspect ratios
@@ -168,12 +173,16 @@ class model_factory():
             self.vae.tile_latent_min_height  = VAE_tile_size[1] 
             self.vae.tile_latent_min_width  = VAE_tile_size[1]
 
-
+        qwen_edit_plus = self.base_model_type in ["qwen_image_edit_plus_20B"]
         self.vae.enable_slicing()
         # width, height = aspect_ratios["16:9"]
 
         if n_prompt is None or len(n_prompt) == 0:
             n_prompt=  "text, watermark, copyright, blurry, low resolution"
+
+        image_mask = None if input_masks is None else convert_tensor_to_image(input_masks, mask_levels= True) 
+        if input_frames is not None:
+            input_ref_images = [convert_tensor_to_image(input_frames) ] +  ([] if input_ref_images  is None else input_ref_images )
 
         if input_ref_images is not None:
             # image stiching method
@@ -182,14 +191,16 @@ class model_factory():
                 w, h = input_ref_images[0].size
                 height, width = calculate_new_dimensions(height, width, h, w, fit_into_canvas)
 
-            for new_img in input_ref_images[1:]:
-                stiched = stitch_images(stiched, new_img)
-            input_ref_images  = [stiched]
+            if not qwen_edit_plus:
+                for new_img in input_ref_images[1:]:
+                    stiched = stitch_images(stiched, new_img)
+                input_ref_images  = [stiched]
 
         image = self.pipeline(
             prompt=input_prompt,
             negative_prompt=n_prompt,
             image = input_ref_images,
+            image_mask = image_mask,
             width=width,
             height=height,
             num_inference_steps=sampling_steps,
@@ -199,8 +210,19 @@ class model_factory():
             pipeline=self,
             loras_slists=loras_slists,
             joint_pass = joint_pass,
-            generator=torch.Generator(device="cuda").manual_seed(seed)
-        )        
+            denoising_strength=denoising_strength,
+            generator=torch.Generator(device="cuda").manual_seed(seed),
+            lora_inpaint = image_mask is not None and model_mode == 1,
+            outpainting_dims = outpainting_dims,
+            qwen_edit_plus = qwen_edit_plus,
+        )      
         if image is None: return None
         return image.transpose(0, 1)
+
+    def get_loras_transformer(self, get_model_recursive_prop, model_type, model_mode, **kwargs):
+        if model_mode == 0: return [], []
+        preloadURLs = get_model_recursive_prop(model_type,  "preload_URLs")
+        if len(preloadURLs) == 0: return [], []
+        return [os.path.join("ckpts", os.path.basename(preloadURLs[0]))] , [1]
+
 
