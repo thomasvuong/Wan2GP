@@ -447,7 +447,7 @@ class WanAny2V:
         if model_type in ["i2v", "i2v_2_2", "fun_inp_1.3B", "fun_inp", "fantasy", "multitalk", "infinitetalk", "i2v_2_2_multitalk", "flf2v_720p"]:
             any_end_frame = False
             if infinitetalk:
-                new_shot = "Q" in video_prompt_type
+                new_shot = "0" in video_prompt_type
                 if input_frames is not None:
                     image_ref = input_frames[:, 0]
                 else:

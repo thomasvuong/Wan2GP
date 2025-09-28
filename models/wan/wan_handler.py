@@ -147,15 +147,15 @@ class family_handler():
             extra_model_def["all_image_refs_are_background_ref"] = True
             extra_model_def["guide_custom_choices"] = {
             "choices":[
-                ("Images to Video, each Reference Image will start a new shot with a new Sliding Window - Sharp Transitions", "QKI"),
+                ("Images to Video, each Reference Image will start a new shot with a new Sliding Window - Sharp Transitions", "0KI"),
                 ("Images to Video, each Reference Image will start a new shot with a new Sliding Window - Smooth Transitions", "KI"),
-                ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window - Sharp Transitions", "QRUV"),
+                ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window - Sharp Transitions", "0RUV"),
                 ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window - Smooth Transitions", "RUV"),
-                ("Video to Video, amount of motion transferred depends on Denoising Strength - Sharp Transitions", "GQUV"),
+                ("Video to Video, amount of motion transferred depends on Denoising Strength - Sharp Transitions", "G0UV"),
                 ("Video to Video, amount of motion transferred depends on Denoising Strength - Smooth Transitions", "GUV"),
             ],
             "default": "KI",
-            "letters_filter": "RGUVQKI",
+            "letters_filter": "RGUV0KI",
             "label": "Video to Video",
             "show_label" : False,
             }
@@ -190,6 +190,7 @@ class family_handler():
                 ("Apply Relighting", "1"),
             ],
             "label": "Custom Process",
+            "letters_filter": "1",
             "show_label" : False,
             "scale": 1,
             }
@@ -427,7 +428,7 @@ class family_handler():
                     ui_defaults["audio_guidance_scale"]= 1
                 video_prompt_type = ui_defaults.get("video_prompt_type", "")
                 if "I" in video_prompt_type:
-                    video_prompt_type = video_prompt_type.replace("KI", "QKI")
+                    video_prompt_type = video_prompt_type.replace("KI", "0KI")
                     ui_defaults["video_prompt_type"] = video_prompt_type 
 
         if settings_version < 2.28:
@@ -461,6 +462,13 @@ class family_handler():
                     video_prompt_type = video_prompt_type.replace("1", "#1")
                     ui_defaults["video_prompt_type"] = video_prompt_type 
 
+        if settings_version < 2.38:
+            if base_model_type in ["infinitetalk"]:
+                video_prompt_type = ui_defaults.get("video_prompt_type", "")
+                if "Q" in video_prompt_type:
+                    video_prompt_type = video_prompt_type.replace("Q", "0")
+                    ui_defaults["video_prompt_type"] = video_prompt_type 
+
     @staticmethod
     def update_default_settings(base_model_type, model_def, ui_defaults):
         ui_defaults.update({
@@ -491,7 +499,7 @@ class family_handler():
                 "sliding_window_overlap" : 9,
                 "sliding_window_size": 81, 
                 "sample_solver" : "euler",
-                "video_prompt_type": "QKI",
+                "video_prompt_type": "0KI",
                 "remove_background_images_ref" : 0,
                 "adaptive_switch" : 1,
             })
