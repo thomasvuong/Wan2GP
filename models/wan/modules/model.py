@@ -1342,6 +1342,7 @@ class WanModel(ModelMixin, ConfigMixin):
         y = None
         
         motion_vec_list = []
+        if face_pixel_values is None: face_pixel_values =  [None] * len(x_list)
         for i, (x, one_face_pixel_values) in enumerate(zip(x_list, face_pixel_values)):
                 # animate embeddings
                 motion_vec = None
