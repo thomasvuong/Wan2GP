@@ -9852,7 +9852,7 @@ def create_ui():
                         # video_guide, image_guide, video_mask, image_mask, image_refs, 
                     ) = generate_video_tab(model_family=model_family, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs, tab_id='generate')
             with gr.Tab("Edit", id="edit") as edit_tab:
-                gr.Markdown("<div align=center><H2>Edit Task</H2></div>")
+                edit_title_md = gr.Markdown()
                 edit_tab_components = generate_video_tab(
                     update_form=False, 
                     state_dict=state.value, 
@@ -9867,7 +9867,7 @@ def create_ui():
                 def fill_inputs_for_edit(state):
                     editing_task_index = state.get("editing_task_index", None)
                     if editing_task_index is None:
-                        return [gr.update()] * len(edit_tab_components)
+                        return [gr.update()] + [gr.update()] * len(edit_tab_components)
 
                     gen = get_gen_info(state)
                     queue = gen.get("queue", [])
@@ -9876,10 +9876,13 @@ def create_ui():
                     if task_to_edit_index >= len(queue):
                         gr.Warning("Task to edit not found in queue.")
                         state["editing_task_index"] = None
-                        return [gr.update()] * len(edit_tab_components)
+                        return [gr.update()] + [gr.update()] * len(edit_tab_components)
 
                     task = queue[task_to_edit_index]
                     ui_defaults = task['params']
+                    
+                    prompt_text = task.get('prompt', 'Unknown Prompt')[:80]
+                    edit_title_text = f"<div align='center'><h2 style=\"font-family: 'Segoe UI', Roboto, sans-serif;\">Editing <span style='color: #4A90E2; font-weight: 400; letter-spacing: 0.5px;'>'{prompt_text}'</span></h2></div>"
 
                     image_list_keys = ['image_start', 'image_end', 'image_refs']
                     for key in image_list_keys:
@@ -9890,11 +9893,12 @@ def create_ui():
                     if ui_defaults.get('model_type') != state["model_type"]:
                         gr.Warning(f"Editing a task for a different model ({ui_defaults.get('model_type')}). Some settings may not apply.")
 
-                    return generate_video_tab(update_form=True, state_dict=state, ui_defaults=ui_defaults)
+                    return [edit_title_text] + generate_video_tab(update_form=True, state_dict=state, ui_defaults=ui_defaults)
+
                 edit_tab.select(
                     fn=fill_inputs_for_edit,
                     inputs=[state],
-                    outputs=edit_tab_components
+                    outputs=[edit_title_md] + edit_tab_components
                 )
             with gr.Tab("Guides", id="info") as info_tab:
                 generate_info_tab()
