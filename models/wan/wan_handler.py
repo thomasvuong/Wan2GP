@@ -147,18 +147,29 @@ class family_handler():
             extra_model_def["all_image_refs_are_background_ref"] = True
             extra_model_def["guide_custom_choices"] = {
             "choices":[
-                ("Images to Video, each Reference Image will start a new shot with a new Sliding Window - Sharp Transitions", "0KI"),
-                ("Images to Video, each Reference Image will start a new shot with a new Sliding Window - Smooth Transitions", "KI"),
-                ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window - Sharp Transitions", "0RUV"),
-                ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window - Smooth Transitions", "RUV"),
-                ("Video to Video, amount of motion transferred depends on Denoising Strength - Sharp Transitions", "G0UV"),
-                ("Video to Video, amount of motion transferred depends on Denoising Strength - Smooth Transitions", "GUV"),
+                ("Images to Video, each Reference Image will start a new shot with a new Sliding Window", "KI"),
+                ("Sparse Video to Video, one Image will by extracted from Video for each new Sliding Window", "RUV"),
+                ("Video to Video, amount of motion transferred depends on Denoising Strength", "GUV"),
             ],
             "default": "KI",
-            "letters_filter": "RGUV0KI",
+            "letters_filter": "RGUVKI",
             "label": "Video to Video",
+            "scale": 3,
             "show_label" : False,
             }
+
+            extra_model_def["custom_video_selection"] = {
+            "choices":[
+                ("Smooth Transitions", ""),
+                ("Sharp Transitions", "0"),
+            ],
+            "trigger": "",
+            "label": "Custom Process",
+            "letters_filter": "0",
+            "show_label" : False,
+            "scale": 1,
+            }
+
 
             # extra_model_def["at_least_one_image_ref_needed"] = True
         if base_model_type in ["lucy_edit"]:
@@ -189,7 +200,9 @@ class family_handler():
                 ("None", ""),
                 ("Apply Relighting", "1"),
             ],
+            "trigger": "#",
             "label": "Custom Process",
+            "type": "checkbox",
             "letters_filter": "1",
             "show_label" : False,
             "scale": 1,

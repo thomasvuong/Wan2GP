@@ -1058,7 +1058,7 @@ class WanAny2V:
 
     def get_loras_transformer(self, get_model_recursive_prop, base_model_type, model_type, video_prompt_type, model_mode, **kwargs):
         if base_model_type == "animate":
-            if "1" in video_prompt_type:
+            if "#" in video_prompt_type and "1" in video_prompt_type:
                 preloadURLs = get_model_recursive_prop(model_type,  "preload_URLs")
                 if len(preloadURLs) > 0: 
                     return [os.path.join("ckpts", os.path.basename(preloadURLs[0]))] , [1]
