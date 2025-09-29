@@ -512,7 +512,6 @@ def extract_source_images(video_path, output_dir=None):
         list: List of extracted image file paths
     """
     import os
-    import tempfile
     
     if output_dir is None:
         output_dir = os.path.dirname(video_path)
@@ -560,6 +559,8 @@ def extract_source_images(video_path, output_dir=None):
         
         # Extract each attachment stream
         extracted_files = []
+        used_filenames = set()  # Track filenames to avoid collisions
+        
         for stream_idx in attachment_streams:
             # Get original filename from metadata if available
             stream_info = probe_data['streams'][stream_idx]
@@ -575,7 +576,16 @@ def extract_source_images(video_path, output_dir=None):
             if not safe_filename.lower().endswith(('.jpg', '.jpeg', '.png')):
                 safe_filename += '.png'
             
-            output_file = os.path.join(output_dir, safe_filename)
+            # Handle filename collisions
+            base_name, ext = os.path.splitext(safe_filename)
+            counter = 0
+            final_filename = safe_filename
+            while final_filename in used_filenames:
+                counter += 1
+                final_filename = f"{base_name}_{counter}{ext}"
+            used_filenames.add(final_filename)
+            
+            output_file = os.path.join(output_dir, final_filename)
             
             # Extract the attachment stream
             extract_cmd = [
@@ -589,12 +599,12 @@ def extract_source_images(video_path, output_dir=None):
                 if os.path.exists(output_file):
                     extracted_files.append(output_file)
             except subprocess.CalledProcessError as e:
-                print(f"Failed to extract attachment {stream_idx}: {e.stderr}")
+                print(f"Failed to extract attachment {stream_idx} from {os.path.basename(video_path)}: {e.stderr}")
         
         return extracted_files
             
     except subprocess.CalledProcessError as e:
-        print(f"Error extracting source images: {e.stderr}")
+        print(f"Error extracting source images from {os.path.basename(video_path)}: {e.stderr}")
         return []
 
 
