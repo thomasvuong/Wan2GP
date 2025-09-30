@@ -268,9 +268,12 @@ def save_video(tensor,
             writer.close()
             
             # Embed source images if provided and container supports it
-            if source_images and container == 'mkv':
+            if source_images and container in ['mkv', 'mp4']:
                 try:
-                    cache_file = embed_source_images_metadata(cache_file, source_images)
+                    if container == 'mp4':
+                        cache_file = embed_source_images_metadata_mp4(cache_file, source_images)
+                    else:  # mkv
+                        cache_file = embed_source_images_metadata(cache_file, source_images)
                 except Exception as e:
                     print(f"Warning: Failed to embed source images: {e}")
             
@@ -281,9 +284,107 @@ def save_video(tensor,
             print(f"error saving {save_file}: {e}")
 
 
+def embed_source_images_metadata_mp4(video_path, source_images):
+    """
+    Embed source images as cover art in MP4 files using mutagen.
+    
+    Args:
+        video_path (str): Path to the MP4 video file
+        source_images (dict): Dictionary containing source images
+            Expected keys: 'image_start', 'image_end', 'image_refs'
+            Values should be PIL Images or file paths
+    
+    Returns:
+        str: Path to the video file with embedded cover art
+    """
+    from mutagen.mp4 import MP4, MP4Cover, AtomDataType
+    import io
+    
+    if not source_images:
+        return video_path
+    
+    try:
+        file = MP4(video_path)
+        if file.tags is None:
+            file.add_tags()
+        
+        # Convert source images to cover art
+        cover_data = []
+        
+        # Process each source image type
+        for img_type, img_data in source_images.items():
+            if img_data is None:
+                continue
+                
+            # Handle different image input types
+            if isinstance(img_data, list):
+                # Multiple images (e.g., image_refs)
+                for i, img in enumerate(img_data):
+                    if img is not None:
+                        cover_bytes, image_format = _convert_image_to_bytes(img)
+                        if cover_bytes:
+                            cover_data.append(MP4Cover(cover_bytes, image_format))
+            else:
+                # Single image
+                cover_bytes, image_format = _convert_image_to_bytes(img_data)
+                if cover_bytes:
+                    cover_data.append(MP4Cover(cover_bytes, image_format))
+        
+        if cover_data:
+            file.tags['covr'] = cover_data
+            file.save()
+            print(f"Successfully embedded {len(cover_data)} cover images in {video_path}")
+        
+    except Exception as e:
+        print(f"Failed to embed cover art with mutagen: {e}")
+        print(f"This might be due to image format or MP4 file structure issues")
+    
+    return video_path
+
+
+def _convert_image_to_bytes(img_data):
+    """
+    Convert PIL Image or file path to image bytes with proper format detection.
+    
+    Args:
+        img_data: PIL Image object or file path string
+        
+    Returns:
+        tuple: (bytes, AtomDataType) - image data and format, or (None, None) if conversion failed
+    """
+    from mutagen.mp4 import AtomDataType
+    import io
+    
+    try:
+        if hasattr(img_data, 'save'):  # PIL Image
+            # For PIL Images, save as JPEG for better compatibility
+            img_bytes = io.BytesIO()
+            img_data.save(img_bytes, format='JPEG')
+            return img_bytes.getvalue(), AtomDataType.JPEG
+            
+        elif isinstance(img_data, str) and os.path.exists(img_data):  # File path
+            with open(img_data, 'rb') as f:
+                # Detect format based on file extension
+                if img_data.lower().endswith(('.jpg', '.jpeg')):
+                    return f.read(), AtomDataType.JPEG
+                elif img_data.lower().endswith('.png'):
+                    return f.read(), AtomDataType.PNG
+                else:
+                    # Convert unknown formats to JPEG using PIL
+                    img = Image.open(f)
+                    img_bytes = io.BytesIO()
+                    img.save(img_bytes, format='JPEG')
+                    return img_bytes.getvalue(), AtomDataType.JPEG
+                    
+    except Exception as e:
+        print(f"Failed to convert image to bytes: {e}")
+        return None, None
+
+
 def embed_source_images_metadata(video_path, source_images):
     """
     Embed source images as attachments in MKV video files using FFmpeg.
+    For MP4 files, use embed_source_images_metadata_mp4 instead.
     
     Args:
         video_path (str): Path to the video file
@@ -500,12 +601,91 @@ def _save_temp_image(img_data, temp_dir, name):
         return None
 
 
-def extract_source_images(video_path, output_dir=None):
+def _extract_mp4_cover_art(video_path, output_dir):
     """
-    Extract embedded source images from MKV video files.
+    Extract cover art from MP4 files using mutagen.
     
     Args:
-        video_path (str): Path to the MKV video file
+        video_path (str): Path to the MP4 file
+        output_dir (str): Directory to save extracted images
+    
+    Returns:
+        list: List of extracted image file paths
+    """
+    try:
+        from mutagen.mp4 import MP4, AtomDataType
+        import os
+        
+        print(f"DEBUG: Extracting cover art from MP4: {video_path}")
+        
+        file = MP4(video_path)
+        
+        if file.tags is None:
+            print("DEBUG: No tags found in MP4 file")
+            return []
+            
+        if 'covr' not in file.tags:
+            print("DEBUG: No cover art found in MP4 tags")
+            print(f"DEBUG: Available tags: {list(file.tags.keys())}")
+            return []
+        
+        cover_art = file.tags['covr']
+        print(f"DEBUG: Found {len(cover_art)} cover art images")
+        extracted_files = []
+        
+        # Map cover art to semantic names based on order
+        # Since MP4 doesn't preserve semantic meaning, we'll use a heuristic:
+        # - First image: image_start
+        # - Second image: image_end  
+        # - Additional images: image_refs
+        semantic_names = ['image_start', 'image_end'] + [f'image_refs_{i}' for i in range(10)]
+        
+        for i, cover in enumerate(cover_art):
+            # Determine file extension based on format
+            if cover.imageformat == AtomDataType.JPEG:
+                ext = '.jpg'
+            elif cover.imageformat == AtomDataType.PNG:
+                ext = '.png'
+            else:
+                ext = '.jpg'  # Default to JPEG
+            
+            # Create semantic filename for GUI recognition
+            if i < len(semantic_names):
+                filename = f"{semantic_names[i]}{ext}"
+            else:
+                filename = f"cover_art_{i+1}{ext}"
+            
+            output_file = os.path.join(output_dir, filename)
+            
+            print(f"DEBUG: Writing cover art {i+1} to: {filename} ({len(cover):,} bytes)")
+            
+            # Write cover art to file
+            with open(output_file, 'wb') as f:
+                f.write(cover)
+            
+            if os.path.exists(output_file):
+                extracted_files.append(output_file)
+                print(f"DEBUG: Successfully extracted: {filename}")
+            else:
+                print(f"DEBUG: Failed to create file: {filename}")
+        
+        print(f"DEBUG: Total extracted files: {len(extracted_files)}")
+        return extracted_files
+        
+    except Exception as e:
+        print(f"DEBUG: Error extracting cover art from MP4: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def extract_source_images(video_path, output_dir=None):
+    """
+    Extract embedded source images from video files.
+    Supports MKV (attachments via ffmpeg) and MP4 (cover art via mutagen).
+    
+    Args:
+        video_path (str): Path to the video file (MKV or MP4)
         output_dir (str): Directory to save extracted images (optional)
     
     Returns:
@@ -518,6 +698,12 @@ def extract_source_images(video_path, output_dir=None):
     
     os.makedirs(output_dir, exist_ok=True)
     
+    # Handle MP4 files with mutagen
+    if video_path.lower().endswith('.mp4'):
+        print(f"DEBUG: Detected MP4 file, using mutagen extraction")
+        return _extract_mp4_cover_art(video_path, output_dir)
+    
+    # Handle MKV files with ffmpeg (existing logic)
     try:
         # First, probe the video to find attachment streams (attached pics)
         probe_cmd = [

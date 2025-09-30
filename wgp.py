@@ -5454,7 +5454,7 @@ def generate_video(
                 else:
                     # Prepare source images for embedding if enabled
                     source_images = {}
-                    if server_config.get("embed_source_images", False) and server_config.get("video_container", "mp4") == "mkv":
+                    if server_config.get("embed_source_images", False) and server_config.get("video_container", "mp4") in ["mkv", "mp4"]:
                         if image_start is not None:
                             source_images["image_start"] = image_start
                         if image_end is not None:
@@ -6567,16 +6567,17 @@ def export_settings(state):
 
 def extract_and_apply_source_images(file_path, state):
     """
-    Extract embedded source images from MKV files and apply them to the UI state.
+    Extract embedded source images from video files and apply them to the UI state.
+    Supports MKV (attachments) and MP4 (cover art) files.
     
     Args:
-        file_path (str): Path to the MKV video file
+        file_path (str): Path to the video file (MKV or MP4)
         state (dict): UI state dictionary
     
     Returns:
         int: Number of source images extracted and applied
     """
-    if not file_path.endswith('.mkv'):
+    if not (file_path.endswith('.mkv') or file_path.endswith('.mp4')):
         return 0
     
     try:
@@ -6587,9 +6588,12 @@ def extract_and_apply_source_images(file_path, state):
         
         # Create temporary directory for extracted images
         with tempfile.TemporaryDirectory() as temp_dir:
+            print(f"DEBUG GUI: Extracting images from: {file_path}")
             extracted_files = extract_source_images(file_path, temp_dir)
+            print(f"DEBUG GUI: Extracted {len(extracted_files)} files: {[os.path.basename(f) for f in extracted_files]}")
             
             if not extracted_files:
+                print("DEBUG GUI: No files extracted, returning 0")
                 return 0
             
             # Process extracted images and apply to state
@@ -6597,13 +6601,16 @@ def extract_and_apply_source_images(file_path, state):
             
             for img_path in extracted_files:
                 img_name = os.path.basename(img_path).lower()
+                print(f"DEBUG GUI: Processing image: {img_name}")
                 
                 try:
                     # Load the image
                     pil_image = Image.open(img_path)
+                    print(f"DEBUG GUI: Loaded image {img_name}: {pil_image.size}")
                     
                     # Apply based on filename
                     if 'image_start' in img_name:
+                        print(f"DEBUG GUI: Applying as image_start")
                         # Apply as start image
                         current_settings = get_model_settings(state, state["model_type"]) or {}
                         current_settings['image_start'] = [pil_image]
@@ -6611,6 +6618,7 @@ def extract_and_apply_source_images(file_path, state):
                         applied_count += 1
                         
                     elif 'image_end' in img_name:
+                        print(f"DEBUG GUI: Applying as image_end")
                         # Apply as end image  
                         current_settings = get_model_settings(state, state["model_type"]) or {}
                         current_settings['image_end'] = [pil_image]
@@ -6618,6 +6626,7 @@ def extract_and_apply_source_images(file_path, state):
                         applied_count += 1
                         
                     elif 'image_refs' in img_name:
+                        print(f"DEBUG GUI: Applying as image_refs")
                         # Apply as reference image
                         current_settings = get_model_settings(state, state["model_type"]) or {}
                         existing_refs = current_settings.get('image_refs', [])
@@ -6658,7 +6667,7 @@ def use_video_settings(state, input_file_list, choice):
             defaults.update(configs)
             prompt = configs.get("prompt", "")
             
-            # Extract and apply embedded source images from MKV files
+            # Extract and apply embedded source images from video files
             extracted_images = extract_and_apply_source_images(file_name, state)
             
             set_model_settings(state, model_type, defaults)
@@ -6804,9 +6813,9 @@ def load_settings_from_file(state, file_path):
     prompt = configs.get("prompt", "")
     is_image = configs.get("is_image", False)
 
-    # Extract and apply embedded source images from MKV files
+    # Extract and apply embedded source images from video files
     extracted_images = 0
-    if file_path.endswith('.mkv'):
+    if file_path.endswith('.mkv') or file_path.endswith('.mp4'):
         extracted_images = extract_and_apply_source_images(file_path, state)
 
     if any_video_or_image_file:    
@@ -9203,8 +9212,8 @@ def generate_configuration_tab(state, blocks, header, model_family, model_choice
 
                 embed_source_images_choice = gr.Checkbox(
                     value=server_config.get("embed_source_images", False),
-                    label="Embed Source Images in Video Files (requires MKV format)",
-                    info="Automatically embeds i2v source images as attachments in the video file for reference"
+                    label="Embed Source Images in Video Files",
+                    info="Automatically embeds i2v source images in the video file for reference (MP4: cover art, MKV: attachments)"
                 )
 
                 image_output_codec_choice = gr.Dropdown(
