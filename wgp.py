@@ -9203,17 +9203,18 @@ def generate_configuration_tab(state, blocks, header, model_family, model_choice
 
                 video_container_choice = gr.Dropdown(
                     choices=[
-                        ("MP4 (Universal Compatibility)", 'mp4'),
-                        ("MKV (Advanced Features + Source Image Embedding)", 'mkv'),
+                        ("MP4", 'mp4'),
                     ],
-                    value=server_config.get("video_container", "mp4"),
-                    label="Video Container Format"
+                    value="mp4",
+                    label="Video Container Format",
+                    interactive=False,
+                    info="MP4 format with embedded cover art for source images"
                 )
 
                 embed_source_images_choice = gr.Checkbox(
                     value=server_config.get("embed_source_images", False),
                     label="Embed Source Images in Video Files",
-                    info="Automatically embeds i2v source images in the video file for reference (MP4: cover art, MKV: attachments)"
+                    info="Automatically embeds i2v source images"
                 )
 
                 image_output_codec_choice = gr.Dropdown(
