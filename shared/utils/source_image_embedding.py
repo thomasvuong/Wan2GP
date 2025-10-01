@@ -485,21 +485,15 @@ def _extract_mp4_cover_art(video_path, output_dir):
     try:
         from mutagen.mp4 import MP4, AtomDataType
         
-        print(f"DEBUG: Extracting cover art from MP4: {video_path}")
-        
         file = MP4(video_path)
         
         if file.tags is None:
-            print("DEBUG: No tags found in MP4 file")
             return []
             
         if 'covr' not in file.tags:
-            print("DEBUG: No cover art found in MP4 tags")
-            print(f"DEBUG: Available tags: {list(file.tags.keys())}")
             return []
         
         cover_art = file.tags['covr']
-        print(f"DEBUG: Found {len(cover_art)} cover art images")
         extracted_files = []
         
         # Map cover art to semantic names based on order
@@ -526,25 +520,17 @@ def _extract_mp4_cover_art(video_path, output_dir):
             
             output_file = os.path.join(output_dir, filename)
             
-            print(f"DEBUG: Writing cover art {i+1} to: {filename} ({len(cover):,} bytes)")
-            
             # Write cover art to file
             with open(output_file, 'wb') as f:
                 f.write(cover)
             
             if os.path.exists(output_file):
                 extracted_files.append(output_file)
-                print(f"DEBUG: Successfully extracted: {filename}")
-            else:
-                print(f"DEBUG: Failed to create file: {filename}")
         
-        print(f"DEBUG: Total extracted files: {len(extracted_files)}")
         return extracted_files
         
     except Exception as e:
-        print(f"DEBUG: Error extracting cover art from MP4: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error extracting cover art from MP4: {e}")
         return []
 
 
@@ -567,7 +553,6 @@ def extract_source_images(video_path, output_dir=None):
     
     # Handle MP4 files with mutagen
     if video_path.lower().endswith('.mp4'):
-        print(f"DEBUG: Detected MP4 file, using mutagen extraction")
         return _extract_mp4_cover_art(video_path, output_dir)
     
     # Handle MKV files with ffmpeg (existing logic)
