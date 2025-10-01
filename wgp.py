@@ -4271,11 +4271,9 @@ def edit_video(
                 file_list.append(new_video_path)
                 file_settings_list.append(configs)
 
-            if configs != None:    
-                from mutagen.mp4 import MP4
-                file = MP4(new_video_path)
-                file.tags['©cmt'] = [json.dumps(configs)]
-                file.save()        
+            if configs != None:
+                from shared.utils.video_metadata import save_metadata_to_mp4
+                save_metadata_to_mp4(new_video_path, configs)        
 
             send_cmd("output")
             seed = set_seed(-1)
@@ -5452,16 +5450,10 @@ def generate_video(
 
                 else:
                     # Prepare source images for embedding if enabled
-                    source_images = {}
-                    if server_config.get("embed_source_images", False) and server_config.get("video_container", "mp4") in ["mkv", "mp4"]:
-                        if image_start is not None:
-                            source_images["image_start"] = image_start
-                        if image_end is not None:
-                            source_images["image_end"] = image_end
-                        if image_refs is not None:
-                            source_images["image_refs"] = image_refs
+                    from shared.utils.source_image_embedding import prepare_source_images_dict
+                    source_images = prepare_source_images_dict(server_config, image_start, image_end, image_refs)
                     
-                    save_video( tensor=sample[None], save_file=video_path, fps=output_fps, nrow=1, normalize=True, value_range=(-1, 1),  codec_type= server_config.get("video_output_codec", None), container=server_config.get("video_container", "mp4"), source_images=source_images if source_images else None)
+                    save_video( tensor=sample[None], save_file=video_path, fps=output_fps, nrow=1, normalize=True, value_range=(-1, 1),  codec_type= server_config.get("video_output_codec", None), container=server_config.get("video_container", "mp4"), source_images=source_images)
 
                 end_time = time.time()
 
@@ -5499,41 +5491,10 @@ def generate_video(
                     elif metadata_choice == "metadata":
                         if is_image:
                             save_image_metadata(path, configs)
-                        elif path.endswith('.mp4'):
-                            from mutagen.mp4 import MP4
-                            file = MP4(path)
-                            file.tags['©cmt'] = [json.dumps(configs)]
-                            file.save()
-                        elif path.endswith('.mkv'):
-                            # For MKV files, embed metadata using FFmpeg
+                        else:
+                            from shared.utils.video_metadata import save_metadata_to_video
                             try:
-                                import subprocess
-                                import tempfile
-                                
-                                # Create temporary file with metadata
-                                temp_path = path.replace('.mkv', '_temp_with_metadata.mkv')
-                                
-                                # Use FFmpeg to add metadata while preserving ALL streams (including attachments)
-                                ffmpeg_cmd = [
-                                    'ffmpeg', '-y', '-i', path,
-                                    '-metadata', f'comment={json.dumps(configs)}',
-                                    '-map', '0',  # Map all streams from input (including attachments)
-                                    '-c', 'copy',  # Copy streams without re-encoding
-                                    temp_path
-                                ]
-                                
-                                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-                                
-                                if result.returncode == 0:
-                                    # Replace original with metadata version
-                                    import shutil
-                                    shutil.move(temp_path, path)
-                                else:
-                                    print(f"Warning: Failed to add metadata to MKV file: {result.stderr}")
-                                    # Clean up temp file if it exists
-                                    if os.path.exists(temp_path):
-                                        os.remove(temp_path)
-                                        
+                                save_metadata_to_video(path, configs)
                             except Exception as e:
                                 print(f"Error adding metadata to MKV file {path}: {e}")
                     if is_image:
@@ -6565,86 +6526,13 @@ def export_settings(state):
 
 
 def extract_and_apply_source_images(file_path, state):
-    """
-    Extract embedded source images from video files and apply them to the UI state.
-    Supports MKV (attachments) and MP4 (cover art) files.
-    
-    Args:
-        file_path (str): Path to the video file (MKV or MP4)
-        state (dict): UI state dictionary
-    
-    Returns:
-        int: Number of source images extracted and applied
-    """
-    if not (file_path.endswith('.mkv') or file_path.endswith('.mp4')):
-        return 0
-    
-    try:
-        from shared.utils.audio_video import extract_source_images
-        import tempfile
-        import os
-        from PIL import Image
-        
-        # Create temporary directory for extracted images
-        with tempfile.TemporaryDirectory() as temp_dir:
-            print(f"DEBUG GUI: Extracting images from: {file_path}")
-            extracted_files = extract_source_images(file_path, temp_dir)
-            print(f"DEBUG GUI: Extracted {len(extracted_files)} files: {[os.path.basename(f) for f in extracted_files]}")
-            
-            if not extracted_files:
-                print("DEBUG GUI: No files extracted, returning 0")
-                return 0
-            
-            # Process extracted images and apply to state
-            applied_count = 0
-            
-            for img_path in extracted_files:
-                img_name = os.path.basename(img_path).lower()
-                print(f"DEBUG GUI: Processing image: {img_name}")
-                
-                try:
-                    # Load the image
-                    pil_image = Image.open(img_path)
-                    print(f"DEBUG GUI: Loaded image {img_name}: {pil_image.size}")
-                    
-                    # Apply based on filename
-                    if 'image_start' in img_name:
-                        print(f"DEBUG GUI: Applying as image_start")
-                        # Apply as start image
-                        current_settings = get_model_settings(state, state["model_type"]) or {}
-                        current_settings['image_start'] = [pil_image]
-                        set_model_settings(state, state["model_type"], current_settings)
-                        applied_count += 1
-                        
-                    elif 'image_end' in img_name:
-                        print(f"DEBUG GUI: Applying as image_end")
-                        # Apply as end image  
-                        current_settings = get_model_settings(state, state["model_type"]) or {}
-                        current_settings['image_end'] = [pil_image]
-                        set_model_settings(state, state["model_type"], current_settings)
-                        applied_count += 1
-                        
-                    elif 'image_refs' in img_name:
-                        print(f"DEBUG GUI: Applying as image_refs")
-                        # Apply as reference image
-                        current_settings = get_model_settings(state, state["model_type"]) or {}
-                        existing_refs = current_settings.get('image_refs', [])
-                        if not isinstance(existing_refs, list):
-                            existing_refs = []
-                        existing_refs.append(pil_image)
-                        current_settings['image_refs'] = existing_refs
-                        set_model_settings(state, state["model_type"], current_settings)
-                        applied_count += 1
-                        
-                except Exception as e:
-                    print(f"Error processing extracted image {img_path}: {e}")
-                    continue
-            
-            return applied_count
-            
-    except Exception as e:
-        print(f"Error extracting source images from {file_path}: {e}")
-        return 0
+    """UI glue: get state, call module, set state. ALL logic is in source_image_embedding module."""
+    from shared.utils.source_image_embedding import extract_and_apply_to_settings
+    current_settings = get_model_settings(state, state["model_type"]) or {}
+    updated_settings, applied_count = extract_and_apply_to_settings(file_path, current_settings)
+    if applied_count > 0:
+        set_model_settings(state, state["model_type"], updated_settings)
+    return applied_count
 
 
 def use_video_settings(state, input_file_list, choice):
@@ -6698,39 +6586,12 @@ def get_settings_from_file(state, file_path, allow_json, merge_with_defaults, sw
                 configs = json.load(f)
         except:
             pass
-    elif file_path.endswith(".mp4"):
-        from mutagen.mp4 import MP4
+    elif file_path.endswith(".mp4") or file_path.endswith(".mkv"):
+        from shared.utils.video_metadata import read_metadata_from_video
         try:
-            file = MP4(file_path)
-            tags = file.tags['©cmt'][0] 
-            configs = json.loads(tags)
-            any_image_or_video = True
-        except:
-            pass
-    elif file_path.endswith(".mkv"):
-        # For MKV files, try to read metadata from attachments or use ffprobe
-        try:
-            import subprocess
-            # Try to get metadata using ffprobe
-            result = subprocess.run([
-                'ffprobe', '-v', 'quiet', '-print_format', 'json', 
-                '-show_format', file_path
-            ], capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                import json as json_module
-                probe_data = json_module.loads(result.stdout)
-                format_tags = probe_data.get('format', {}).get('tags', {})
-                
-                # Look for our metadata in various possible tag locations
-                for tag_key in ['comment', 'COMMENT', 'description', 'DESCRIPTION']:
-                    if tag_key in format_tags:
-                        try:
-                            configs = json.loads(format_tags[tag_key])
-                            any_image_or_video = True
-                            break
-                        except:
-                            continue
+            configs = read_metadata_from_video(file_path)
+            if configs:
+                any_image_or_video = True
         except:
             pass
     elif has_image_file_extension(file_path):
