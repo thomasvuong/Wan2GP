@@ -10171,7 +10171,7 @@ def create_ui():
                         return [gr.update()] + [gr.update()] * len(edit_tab_components)
 
                     task = queue[task_to_edit_index]
-                    ui_defaults = task['params']
+                    ui_defaults = task['params'].copy()
                     
                     prompt_text = task.get('prompt', 'Unknown Prompt')[:80]
                     edit_title_text = f"<div align='center'><h2 style=\"font-family: 'Segoe UI', Roboto, sans-serif;\">Editing <span style='color: #4A90E2; font-weight: 400; letter-spacing: 0.5px;'>'{prompt_text}'</span></h2></div>"
