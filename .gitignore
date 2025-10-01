@@ -42,6 +42,6 @@ ckpts/
 loras/
 loras_i2v/
 
-wgp_config.json
-
 settings/
+
+wgp_config.json
