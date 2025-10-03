@@ -15,6 +15,3 @@ class LoraSetterPlugin(WAN2GPPlugin):
             }
         
         return {}
-        
-    def setup_ui(self) -> None:
-        pass

@@ -7,6 +7,11 @@ class ExamplePlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Example Plugin"
         self.version = "1.0.1"
+        self.add_tab(
+            tab_id="example_plugin_tab",
+            label="Example Plugin",
+            component_constructor=self.create_hello_world_tab
+        )
         
     def create_hello_world_tab(self):
         with gr.Blocks() as demo:
@@ -22,10 +27,3 @@ class ExamplePlugin(WAN2GPPlugin):
                 outputs=output
             )
         return demo
-        
-    def setup_ui(self) -> None:
-        self.add_tab(
-            tab_id="example_plugin_tab",
-            label="Example Plugin",
-            component_constructor=self.create_hello_world_tab
-        )

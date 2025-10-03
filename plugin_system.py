@@ -19,6 +19,7 @@ class WAN2GPPlugin:
         self.name = self.__class__.__name__
         self.version = "1.0.0"
         self._component_requests: List[str] = []
+        self._setup_complete = False
         
     def setup_ui(self) -> None:
         pass
