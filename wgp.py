@@ -53,7 +53,14 @@ from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
-
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+try:
+    from plugin_system import PluginManager
+    PLUGIN_SYSTEM_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not load plugin system: {e}")
+    PLUGIN_SYSTEM_AVAILABLE = False
 # import torch._dynamo as dynamo
 # dynamo.config.recompile_limit = 2000   # default is 256
 # dynamo.config.accumulated_recompile_limit = 2000  # or whatever limit you want
@@ -8878,7 +8885,12 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 outputs=[modal_container]
             )
 
-    return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger,
+    tab_locals_dict = {
+        name: obj for name, obj in locals().items()
+        if isinstance(obj, (gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
+    }
+
+    return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, tab_locals_dict,
             #  video_guide, image_guide, video_mask, image_mask, image_refs,   
             ) 
  
@@ -9880,6 +9892,15 @@ def create_ui():
 
         tab_state = gr.State({ "tab_no":0 }) 
 
+        all_ui_components = {}
+        app.initialize_plugins()
+        plugin_ui = app.setup_plugin_ui()
+        plugin_tabs = plugin_ui.get('tabs', {})
+
+        sorted_plugin_tabs = sorted(
+            plugin_tabs.items(),
+            key=lambda x: x[1].get('position', -1)
+        )
         with gr.Tabs(selected="video_gen", ) as main_tabs:
             with gr.Tab("Video Generator", id="video_gen") as video_generator_tab:
                 with gr.Row():
@@ -9897,9 +9918,10 @@ def create_ui():
                         stats_element = stats_app.get_gradio_element()
 
                 with gr.Row():
-                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger
+                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, generate_tab_components
                         # video_guide, image_guide, video_mask, image_mask, image_refs, 
                     ) = generate_video_tab(model_family=model_family, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs)
+                    all_ui_components.update(generate_tab_components)
             with gr.Tab("Guides", id="info") as info_tab:
                 generate_info_tab()
             with gr.Tab("Video Mask Creator", id="video_mask_creator") as video_mask_creator:
@@ -9911,11 +9933,86 @@ def create_ui():
                     generate_configuration_tab(state, main, header, model_family, model_choice, resolution, refresh_form_trigger)
             with gr.Tab("About"):
                 generate_about_tab()
+
+            for tab_id, tab_info in sorted_plugin_tabs:
+                with gr.Tab(tab_info['label'], id=f"plugin_{tab_id}"):
+                    tab_info['component_constructor']()
         if stats_app is not None:
             stats_app.setup_events(main, state)
         main_tabs.select(fn=select_tab, inputs= [tab_state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
+
+        main_scope_components = {
+            name: obj for name, obj in locals().items()
+            if isinstance(obj, (gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
+        }
+        all_ui_components.update(main_scope_components)
+        
+        app.ui_components = all_ui_components
+
+        main.load(
+            fn=app.run_post_ui_setup,
+            inputs=None,
+            outputs=list(all_ui_components.values()),
+            show_progress="hidden"
+        )
         return main
 
+class WAN2GPApplication:    
+    def __init__(self):
+        self.plugin_manager = None
+        self.ui_components = {}
+    
+    def initialize_plugins(self) -> None:
+        if not PLUGIN_SYSTEM_AVAILABLE:
+            print("Plugin system is not available. Skipping plugin initialization.")
+            return
+            
+        try:
+            if self.plugin_manager is None:
+                from plugin_system import PluginManager
+                self.plugin_manager = PluginManager()
+                
+                plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+                os.makedirs(plugins_dir, exist_ok=True)
+                
+                self.plugin_manager.load_plugins_from_directory(plugins_dir)
+                
+                print(f"Initialized {len(self.plugin_manager.get_all_plugins())} plugins")
+        except Exception as e:
+            print(f"Error initializing plugins: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def setup_plugin_ui(self) -> dict:
+        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is None:
+            print("Plugin system is not available. Skipping plugin UI setup.")
+            return {}
+            
+        try:
+            ui_components = self.plugin_manager.setup_ui()
+            print(f"Setup UI for {len(self.plugin_manager.get_all_plugins())} plugins")
+            return ui_components
+        except Exception as e:
+            print(f"Error setting up plugin UI: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    def run_post_ui_setup(self):
+        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is None:
+            return [gr.update() for _ in self.ui_components]
+
+        updates_dict = self.plugin_manager.run_post_ui_setup(self.ui_components)
+
+        final_updates = []
+        for component in self.ui_components.values():
+            if component in updates_dict:
+                final_updates.append(updates_dict[component])
+            else:
+                final_updates.append(gr.update())
+        return final_updates
+
+app = WAN2GPApplication()
 if __name__ == "__main__":
     atexit.register(autosave_queue)
     download_ffmpeg()
