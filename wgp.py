@@ -53,12 +53,7 @@ from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
-try:
-    from plugin_system import PluginManager
-    PLUGIN_SYSTEM_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: Could not load plugin system: {e}")
-    PLUGIN_SYSTEM_AVAILABLE = False
+from plugin_system import PluginManager
 # import torch._dynamo as dynamo
 # dynamo.config.recompile_limit = 2000   # default is 256
 # dynamo.config.accumulated_recompile_limit = 2000  # or whatever limit you want
@@ -9953,39 +9948,25 @@ class WAN2GPApplication:
         self.ui_components = {}
 
     def initialize_plugin_manager(self) -> None:
-        """Initialize the plugin manager and load plugins."""
-        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is not None:
-            return
-
         try:
             from plugin_system import PluginManager
             self.plugin_manager = PluginManager()
-
             plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
             os.makedirs(plugins_dir, exist_ok=True)
-
-            # Load and initialize all plugins
             self.plugin_manager.load_plugins_from_directory(plugins_dir)
             print(f"Initialized {len(self.plugin_manager.get_all_plugins())} plugins")
-
         except Exception as e:
             print(f"Error initializing plugin manager: {str(e)}")
             import traceback
             traceback.print_exc()
 
     def run_post_ui_setup(self):
-        """
-        Executes the post_ui_setup method for all plugins.
-        This is intended to be called by the gradio.Blocks.load() event.
-        """
         if hasattr(self, 'ui_components') and self.plugin_manager:
             updates_dict = self.plugin_manager.run_post_ui_setup(self.ui_components)
-            # Convert the dictionary of updates to a list in the correct order.
             final_updates = []
             for component in self.ui_components.values():
                 final_updates.append(updates_dict.get(component, gr.update()))
             return final_updates
-        # Return an empty list of updates if setup is not ready.
         return [gr.update() for _ in self.ui_components]
 
 app = WAN2GPApplication()
