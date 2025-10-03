@@ -18,7 +18,7 @@ class WAN2GPPlugin:
         self.tabs: Dict[str, PluginTab] = {}
         self.name = self.__class__.__name__
         self.version = "1.0.0"
-        self.component_requests: List[str] = []
+        self._component_requests: List[str] = []
         
     def setup_ui(self) -> None:
         pass
@@ -27,8 +27,12 @@ class WAN2GPPlugin:
         self.tabs[tab_id] = PluginTab(id=tab_id, label=label, component_constructor=component_constructor, position=position)
 
     def request_component(self, component_id: str) -> None:
-        if component_id not in self.component_requests:
-            self.component_requests.append(component_id)
+        if component_id not in self._component_requests:
+            self._component_requests.append(component_id)
+            
+    @property
+    def component_requests(self) -> List[str]:
+        return self._component_requests.copy()
 
     def post_ui_setup(self, components: Dict[str, gr.components.Component]) -> Dict[gr.components.Component, Union[gr.update, Any]]:
         return {}
@@ -108,15 +112,19 @@ class PluginManager:
         all_updates: Dict[gr.components.Component, Union[gr.update, Any]] = {}
         for plugin_id, plugin in self.plugins.items():
             try:
+                for comp_id in plugin._component_requests:
+                    if comp_id in all_components:
+                        setattr(plugin, comp_id, all_components[comp_id])
+
                 requested_components = {
                     comp_id: all_components[comp_id]
-                    for comp_id in plugin.component_requests
+                    for comp_id in plugin._component_requests
                     if comp_id in all_components
                 }
 
-                if not requested_components and plugin.component_requests:
+                if not requested_components and plugin._component_requests:
                     print(f"Warning: Plugin '{plugin.name}' requested components that were not found: "
-                          f"{[c for c in plugin.component_requests if c not in all_components]}")
+                          f"{[c for c in plugin._component_requests if c not in all_components]}")
 
                 updates = plugin.post_ui_setup(requested_components)
                 if updates:

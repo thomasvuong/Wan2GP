@@ -9,11 +9,9 @@ class LoraSetterPlugin(WAN2GPPlugin):
         self.request_component("loras_multipliers")
 
     def post_ui_setup(self, components: dict) -> dict:
-        loras_mult_textbox = components.get("loras_multipliers")
-
-        if loras_mult_textbox:
+        if hasattr(self, 'loras_multipliers'):
             return {
-                loras_mult_textbox: gr.Textbox(value="test")
+                self.loras_multipliers: gr.Textbox(value="test")
             }
         
         return {}
