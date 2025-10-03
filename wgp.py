@@ -9892,9 +9892,8 @@ def create_ui():
 
         tab_state = gr.State({ "tab_no":0 }) 
 
-        all_ui_components = {}
-        app.initialize_plugins()
-        plugin_ui = app.setup_plugin_ui()
+        app.initialize_plugin_manager()
+        plugin_ui = app.plugin_manager.setup_ui() if app.plugin_manager else {}
         plugin_tabs = plugin_ui.get('tabs', {})
 
         sorted_plugin_tabs = sorted(
@@ -9921,7 +9920,6 @@ def create_ui():
                     (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, generate_tab_components
                         # video_guide, image_guide, video_mask, image_mask, image_refs, 
                     ) = generate_video_tab(model_family=model_family, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs)
-                    all_ui_components.update(generate_tab_components)
             with gr.Tab("Guides", id="info") as info_tab:
                 generate_info_tab()
             with gr.Tab("Video Mask Creator", id="video_mask_creator") as video_mask_creator:
@@ -9941,76 +9939,56 @@ def create_ui():
             stats_app.setup_events(main, state)
         main_tabs.select(fn=select_tab, inputs= [tab_state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
 
-        main_scope_components = {
-            name: obj for name, obj in locals().items()
-            if isinstance(obj, (gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
-        }
-        all_ui_components.update(main_scope_components)
-        
-        app.ui_components = all_ui_components
+        app.ui_components = generate_tab_components
 
         main.load(
             fn=app.run_post_ui_setup,
             inputs=None,
-            outputs=list(all_ui_components.values()),
+            outputs=list(generate_tab_components.values()),
             show_progress="hidden"
         )
         return main
 
-class WAN2GPApplication:    
+class WAN2GPApplication:
     def __init__(self):
         self.plugin_manager = None
         self.ui_components = {}
-    
-    def initialize_plugins(self) -> None:
-        if not PLUGIN_SYSTEM_AVAILABLE:
-            print("Plugin system is not available. Skipping plugin initialization.")
+
+    def initialize_plugin_manager(self) -> None:
+        """Initialize the plugin manager and load plugins."""
+        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is not None:
             return
-            
+
         try:
-            if self.plugin_manager is None:
-                from plugin_system import PluginManager
-                self.plugin_manager = PluginManager()
-                
-                plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
-                os.makedirs(plugins_dir, exist_ok=True)
-                
-                self.plugin_manager.load_plugins_from_directory(plugins_dir)
-                
-                print(f"Initialized {len(self.plugin_manager.get_all_plugins())} plugins")
+            from plugin_system import PluginManager
+            self.plugin_manager = PluginManager()
+
+            plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+            os.makedirs(plugins_dir, exist_ok=True)
+
+            # Load and initialize all plugins
+            self.plugin_manager.load_plugins_from_directory(plugins_dir)
+            print(f"Initialized {len(self.plugin_manager.get_all_plugins())} plugins")
+
         except Exception as e:
-            print(f"Error initializing plugins: {str(e)}")
+            print(f"Error initializing plugin manager: {str(e)}")
             import traceback
             traceback.print_exc()
-    
-    def setup_plugin_ui(self) -> dict:
-        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is None:
-            print("Plugin system is not available. Skipping plugin UI setup.")
-            return {}
-            
-        try:
-            ui_components = self.plugin_manager.setup_ui()
-            print(f"Setup UI for {len(self.plugin_manager.get_all_plugins())} plugins")
-            return ui_components
-        except Exception as e:
-            print(f"Error setting up plugin UI: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return {}
 
     def run_post_ui_setup(self):
-        if not PLUGIN_SYSTEM_AVAILABLE or self.plugin_manager is None:
-            return [gr.update() for _ in self.ui_components]
-
-        updates_dict = self.plugin_manager.run_post_ui_setup(self.ui_components)
-
-        final_updates = []
-        for component in self.ui_components.values():
-            if component in updates_dict:
-                final_updates.append(updates_dict[component])
-            else:
-                final_updates.append(gr.update())
-        return final_updates
+        """
+        Executes the post_ui_setup method for all plugins.
+        This is intended to be called by the gradio.Blocks.load() event.
+        """
+        if hasattr(self, 'ui_components') and self.plugin_manager:
+            updates_dict = self.plugin_manager.run_post_ui_setup(self.ui_components)
+            # Convert the dictionary of updates to a list in the correct order.
+            final_updates = []
+            for component in self.ui_components.values():
+                final_updates.append(updates_dict.get(component, gr.update()))
+            return final_updates
+        # Return an empty list of updates if setup is not ready.
+        return [gr.update() for _ in self.ui_components]
 
 app = WAN2GPApplication()
 if __name__ == "__main__":
