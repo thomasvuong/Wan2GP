@@ -7791,7 +7791,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         launch_loras = [os.path.basename(path) for path in ui_defaults.get("activated_loras",[])]
 
     with gr.Row():
-        with gr.Column():
+        column_kwargs = {'elem_id': 'edit-tab-content'} if tab_id == 'edit' else {}
+        with gr.Column(**column_kwargs):
             with gr.Column(visible=False, elem_id="image-modal-container") as modal_container: 
                 with gr.Row(elem_id="image-modal-close-button-row"):
                     close_modal_button = gr.Button("❌", size="sm", scale=1)
@@ -8633,6 +8634,11 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         label=f"Override Memory Profile"
                     )
 
+            if not update_form:
+                with gr.Row(visible=(tab_id == 'edit')):
+                    edit_btn = gr.Button("Apply Edits", elem_id="edit_tab_apply_button")
+                    cancel_btn = gr.Button("Cancel")
+                    silent_cancel_btn = gr.Button("Silent Cancel", elem_id="silent_edit_tab_cancel_button", visible=False)
             with gr.Row():
                 save_settings_btn = gr.Button("Set Settings as Default", visible = not args.lock_config)
                 export_settings_from_file_btn = gr.Button("Export Settings to File")
@@ -8648,7 +8654,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         
             mode = gr.Text(value="", visible = False)
 
-        with gr.Column():
+        with gr.Column(visible=(tab_id == 'generate')):
             if not update_form:
                 state = gr.State(state_dict)     
                 gen_status = gr.Text(interactive= False, label = "Status")
@@ -8710,13 +8716,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             video_info_add_videos_btn = gr.Button("Add Videos / Images", size ="sm")
  
             if not update_form:
-                if tab_id == 'edit':
-                    edit_btn = gr.Button("Edit")
-                    cancel_btn = gr.Button("Cancel", elem_id="edit_tab_cancel_button")
-                    silent_cancel_btn = gr.Button("Silent Cancel", elem_id="silent_edit_tab_cancel_button", visible=False)
-                else:
-                    generate_btn = gr.Button("Generate")
-                    add_to_queue_btn = gr.Button("Add New Prompt To Queue", visible=False)
+                generate_btn = gr.Button("Generate")
+                add_to_queue_btn = gr.Button("Add New Prompt To Queue", visible=False)
                 generate_trigger = gr.Text(visible = False) 
                 add_to_queue_trigger = gr.Text(visible = False)
                 js_trigger_index = gr.Text(visible=False, elem_id="js_trigger_for_edit_refresh")
@@ -9861,6 +9862,20 @@ def create_ui():
         h2 {
             margin: 0 20px;
             white-space: nowrap;
+        }
+        #edit-tab-content {
+            max-width: 960px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        #edit_tab_apply_button {
+            background-color: #ec3545 !important;
+            color: white !important;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        #edit_tab_apply_button:hover {
+            background-color: #d82333 !important;
         }
         #queue_html_container table {
             font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
