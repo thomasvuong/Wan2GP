@@ -53,8 +53,6 @@ from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
-import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from plugin_system import PluginManager
     PLUGIN_SYSTEM_AVAILABLE = True
