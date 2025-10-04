@@ -7,6 +7,11 @@ from dataclasses import dataclass
 import gradio as gr
 
 @dataclass
+class InsertAfterRequest:
+    target_component_id: str
+    new_component_constructor: callable
+
+@dataclass
 class PluginTab:
     id: str
     label: str
@@ -19,6 +24,7 @@ class WAN2GPPlugin:
         self.name = self.__class__.__name__
         self.version = "1.0.0"
         self._component_requests: List[str] = []
+        self._insert_after_requests: List[InsertAfterRequest] = []
         self._setup_complete = False
         
     def setup_ui(self) -> None:
@@ -35,6 +41,16 @@ class WAN2GPPlugin:
     def component_requests(self) -> List[str]:
         return self._component_requests.copy()
 
+    def insert_after(self, target_component_id: str, new_component_constructor: callable) -> None:
+        if not hasattr(self, '_insert_after_requests'):
+            self._insert_after_requests = []
+        self._insert_after_requests.append(
+            InsertAfterRequest(
+                target_component_id=target_component_id,
+                new_component_constructor=new_component_constructor
+            )
+        )
+        
     def post_ui_setup(self, components: Dict[str, gr.components.Component]) -> Dict[gr.components.Component, Union[gr.update, Any]]:
         return {}
 
@@ -66,8 +82,6 @@ class PluginManager:
                     self.plugins[module_name] = plugin
                     print(f"Loaded plugin: {plugin.name}")
                     return True
-                    
-            print(f"No plugin class found in {plugin_path}")
             return False
             
         except Exception as e:
@@ -109,30 +123,72 @@ class PluginManager:
                 
         return {'tabs': tabs}
 
-    def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> Dict[gr.components.Component, Union[gr.update, Any]]:
-        all_updates: Dict[gr.components.Component, Union[gr.update, Any]] = {}
+    def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
+        all_insert_requests: List[InsertAfterRequest] = []
+
         for plugin_id, plugin in self.plugins.items():
             try:
-                for comp_id in plugin._component_requests:
+                for comp_id in plugin.component_requests:
                     if comp_id in all_components:
                         setattr(plugin, comp_id, all_components[comp_id])
 
                 requested_components = {
                     comp_id: all_components[comp_id]
-                    for comp_id in plugin._component_requests
+                    for comp_id in plugin.component_requests
                     if comp_id in all_components
                 }
 
-                if not requested_components and plugin._component_requests:
-                    print(f"Warning: Plugin '{plugin.name}' requested components that were not found: "
-                          f"{[c for c in plugin._component_requests if c not in all_components]}")
-
                 updates = plugin.post_ui_setup(requested_components)
                 if updates:
-                    all_updates.update(updates)
-            except Exception as e:
-                print(f"Error in post_ui_setup for plugin {plugin_id}: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                    for component, update_instruction in updates.items():
+                        new_value = None
+                        if isinstance(update_instruction, dict) and update_instruction.get("__type__") == "update":
+                            if 'value' in update_instruction:
+                                new_value = update_instruction['value']
+                        elif isinstance(update_instruction, gr.components.Component):
+                            if hasattr(update_instruction, 'value'):
+                                print(f"Warning: Plugin '{plugin.name}' is returning a new component instance for a value update. Please use gr.update(value=...) instead.")
+                                new_value = getattr(update_instruction, 'value')
+                        else:
+                            new_value = update_instruction
 
-        return all_updates
+                        if new_value is not None:
+                            component.value = new_value
+                            print(f"[PluginManager] Set initial value for component {type(component).__name__}")
+                
+                all_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
+                getattr(plugin, '_insert_after_requests', []).clear()
+
+            except Exception as e:
+                print(f"[PluginManager] Error in post_ui_setup for {plugin_id}: {str(e)}")
+
+        if all_insert_requests:
+            for request in all_insert_requests:
+                target_id = request.target_component_id
+                constructor = request.new_component_constructor
+                
+                try:
+                    if target_id not in all_components:
+                        print(f"[PluginManager] ERROR: Target '{target_id}' for insertion not found.")
+                        continue
+                        
+                    target = all_components[target_id]
+                    parent = getattr(target, 'parent', None)
+                    if parent is None or not hasattr(parent, 'children'):
+                        continue
+
+                    children = list(parent.children)
+                    target_index = children.index(target)
+
+                    with parent:
+                        new_component = constructor()
+
+                    newly_added_component = parent.children.pop(-1)
+                    parent.children.insert(target_index + 1, newly_added_component)
+
+                    print(f"[PluginManager] Successfully inserted {type(new_component).__name__} after {target_id}")
+
+                except Exception as e:
+                    print(f"[PluginManager] Error processing insert_after for {target_id}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()

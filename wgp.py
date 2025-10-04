@@ -9933,13 +9933,7 @@ def create_ui():
         main_tabs.select(fn=select_tab, inputs= [tab_state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
 
         app.ui_components = generate_tab_components
-
-        main.load(
-            fn=app.run_post_ui_setup,
-            inputs=None,
-            outputs=list(generate_tab_components.values()),
-            show_progress="hidden"
-        )
+        app.run_post_ui_setup()
         return main
 
 class WAN2GPApplication:
@@ -9954,7 +9948,6 @@ class WAN2GPApplication:
             plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
             os.makedirs(plugins_dir, exist_ok=True)
             self.plugin_manager.load_plugins_from_directory(plugins_dir)
-            print(f"Initialized {len(self.plugin_manager.get_all_plugins())} plugins")
         except Exception as e:
             print(f"Error initializing plugin manager: {str(e)}")
             import traceback
@@ -9962,12 +9955,7 @@ class WAN2GPApplication:
 
     def run_post_ui_setup(self):
         if hasattr(self, 'ui_components') and self.plugin_manager:
-            updates_dict = self.plugin_manager.run_post_ui_setup(self.ui_components)
-            final_updates = []
-            for component in self.ui_components.values():
-                final_updates.append(updates_dict.get(component, gr.update()))
-            return final_updates
-        return [gr.update() for _ in self.ui_components]
+            self.plugin_manager.run_post_ui_setup(self.ui_components)
 
 app = WAN2GPApplication()
 if __name__ == "__main__":
