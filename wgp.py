@@ -53,7 +53,7 @@ from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
-from plugin_system import PluginManager
+from plugin_system import PluginManager, WAN2GPApplication
 # import torch._dynamo as dynamo
 # dynamo.config.recompile_limit = 2000   # default is 256
 # dynamo.config.accumulated_recompile_limit = 2000  # or whatever limit you want
@@ -9953,29 +9953,8 @@ def create_ui():
         app.run_post_ui_setup()
         return main
 
-class WAN2GPApplication:
-    def __init__(self):
-        self.plugin_manager = None
-        self.ui_components = {}
-
-    def initialize_plugin_manager(self) -> None:
-        try:
-            from plugin_system import PluginManager
-            self.plugin_manager = PluginManager()
-            plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
-            os.makedirs(plugins_dir, exist_ok=True)
-            self.plugin_manager.load_plugins_from_directory(plugins_dir)
-        except Exception as e:
-            print(f"Error initializing plugin manager: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-    def run_post_ui_setup(self):
-        if hasattr(self, 'ui_components') and self.plugin_manager:
-            self.plugin_manager.run_post_ui_setup(self.ui_components)
-
-app = WAN2GPApplication()
 if __name__ == "__main__":
+    app = WAN2GPApplication()
     atexit.register(autosave_queue)
     download_ffmpeg()
     # threading.Thread(target=runner, daemon=True).start()

@@ -5,6 +5,7 @@ import inspect
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass
 import gradio as gr
+import traceback
 
 @dataclass
 class InsertAfterRequest:
@@ -207,3 +208,22 @@ class PluginManager:
                     print(f"[PluginManager] Error processing insert_after for {target_id}: {str(e)}")
                     import traceback
                     traceback.print_exc()
+
+class WAN2GPApplication:
+    def __init__(self):
+        self.plugin_manager = None
+        self.ui_components = {}
+
+    def initialize_plugin_manager(self) -> None:
+        try:
+            self.plugin_manager = PluginManager()
+            plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+            os.makedirs(plugins_dir, exist_ok=True)
+            self.plugin_manager.load_plugins_from_directory(plugins_dir)
+        except Exception as e:
+            print(f"Error initializing plugin manager: {str(e)}")
+            traceback.print_exc()
+
+    def run_post_ui_setup(self):
+        if hasattr(self, 'ui_components') and self.plugin_manager:
+            self.plugin_manager.run_post_ui_setup(self.ui_components)
