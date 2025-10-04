@@ -159,8 +159,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 new_textbox_value = " ".join(textbox_strings)
                 return gr.update(value=new_textbox_value)
 
-
-            with gr.Accordion("Dynamic Lora Multipliers Adjustments", open=False) as main_accordion:
+            with gr.Accordion("Dynamic Lora Multipliers Adjustments", open=True) as main_accordion:
                 gr.HTML(value=css)
                 lora_split_counts = gr.State([1] * MAX_LORA_SLIDERS)
                 lora_slider_ui_groups = []
