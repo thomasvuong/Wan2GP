@@ -90,22 +90,29 @@ class GalleryPlugin(WAN2GPPlugin):
                     const container = document.querySelector(`#${containerId}`);
                     const sliderContainer = document.querySelector(`#${sliderId}`);
                     if (!container || !sliderContainer) return;
+
                     const video = container.querySelector('video');
                     if (!video) return;
+
                     let frameTime = (fps > 0) ? 1 / fps : 0;
                     let isSeekingFromSlider = false;
                     let debounceTimer;
+
                     function updateVideoToFrame(frameNumber) {
                         if (frameTime === 0 || !isFinite(video.duration)) return;
                         const maxFrame = Math.floor(video.duration * fps);
                         const clampedFrame = Math.max(1, Math.min(frameNumber, maxFrame || 1));
                         const targetTime = (clampedFrame - 1) * frameTime;
-                        if (Math.abs(video.currentTime - targetTime) > frameTime / 2) video.currentTime = targetTime;
+                        if (Math.abs(video.currentTime - targetTime) > frameTime / 2) {
+                            video.currentTime = targetTime;
+                        }
                     }
+                    
                     video.addEventListener('loadedmetadata', () => {
                         const sliderInput = sliderContainer.querySelector('input[type="range"]');
                         if (sliderInput) setTimeout(() => updateVideoToFrame(parseInt(sliderInput.value, 10)), 100);
                     }, { once: true });
+
                     video.addEventListener('timeupdate', () => {
                         const sliderInput = sliderContainer.querySelector('input[type="range"]');
                         if (!isSeekingFromSlider && frameTime > 0 && sliderInput) {
@@ -117,11 +124,23 @@ class GalleryPlugin(WAN2GPPlugin):
                             }
                         }
                     });
+
                     const handleSliderInput = () => {
                         const sliderInput = sliderContainer.querySelector('input[type="range"]');
-                        if (sliderInput) { isSeekingFromSlider = true; clearTimeout(debounceTimer); debounceTimer = setTimeout(() => updateVideoToFrame(parseInt(sliderInput.value, 10)), 50); }
+                        if (sliderInput) {
+                            isSeekingFromSlider = true;
+                            const frameNumber = parseInt(sliderInput.value, 10);
+                            clearTimeout(debounceTimer);
+                            debounceTimer = setTimeout(() => {
+                                updateVideoToFrame(frameNumber);
+                            }, 50);
+                        }
                     };
-                    const handleInteractionEnd = () => setTimeout(() => { isSeekingFromSlider = false; }, 150);
+                    
+                    const handleInteractionEnd = () => {
+                        setTimeout(() => { isSeekingFromSlider = false; }, 150);
+                    };
+                    
                     sliderContainer.addEventListener('input', handleSliderInput);
                     sliderContainer.addEventListener('mouseup', handleInteractionEnd);
                     sliderContainer.addEventListener('touchend', handleInteractionEnd);
@@ -132,7 +151,8 @@ class GalleryPlugin(WAN2GPPlugin):
                         if (mutation.type === 'childList') {
                             document.querySelectorAll('.video-joiner-player').forEach(player => {
                                 if (!player.dataset.initialized) {
-                                    const { id: containerId, sliderId, fps } = player.dataset;
+                                    const containerId = player.id;
+                                    const { sliderId, fps } = player.dataset;
                                     if (containerId && sliderId && !isNaN(parseFloat(fps))) {
                                         setupVideoFrameSeeker(containerId, sliderId, parseFloat(fps));
                                         player.dataset.initialized = 'true';
@@ -299,8 +319,25 @@ class GalleryPlugin(WAN2GPPlugin):
         base_url = f"http://{server_name_val}:{server_port_val}"
         v1_fps, _, _, v1_frames = self.get_video_info(vid1_path)
         v2_fps, _, _, v2_frames = self.get_video_info(vid2_path)
-        def create_player(id, path, fps): return f'<div id="{id}" class="video-joiner-player" data-slider-id="{id.replace("container","slider")}" data-fps="{fps}"><video src="{base_url}/gradio_api/file={path}" style="width:100%;" controls muted preload="metadata"></video></div>'
-        return { self.join_interface: gr.Column(visible=True), self.frame_preview_row: gr.Row(visible=False), self.video1_preview: create_player("video1_player_container", vid1_path, v1_fps), self.video2_preview: create_player("video2_player_container", vid2_path, v2_fps), self.video1_path: vid1_path, self.video2_path: vid2_path, self.video1_frame_slider: gr.Slider(maximum=v1_frames, value=v1_frames), self.video2_frame_slider: gr.Slider(maximum=v2_frames, value=1), self.video1_info: self.get_video_info_html(current_state, vid1_path), self.video2_info: self.get_video_info_html(current_state, vid2_path) }
+        
+        def create_player(container_id, slider_id, path, fps): 
+            return f'<div id="{container_id}" class="video-joiner-player" data-slider-id="{slider_id}" data-fps="{fps}"><video src="{base_url}/gradio_api/file={path}" style="width:100%;" controls muted preload="metadata"></video></div>'
+
+        player1_html = create_player("video1_player_container", "video1_frame_slider", vid1_path, v1_fps)
+        player2_html = create_player("video2_player_container", "video2_frame_slider", vid2_path, v2_fps)
+        
+        return { 
+            self.join_interface: gr.Column(visible=True), 
+            self.frame_preview_row: gr.Row(visible=False), 
+            self.video1_preview: gr.HTML(value=player1_html), 
+            self.video2_preview: gr.HTML(value=player2_html), 
+            self.video1_path: vid1_path, 
+            self.video2_path: vid2_path, 
+            self.video1_frame_slider: gr.Slider(maximum=v1_frames, value=v1_frames), 
+            self.video2_frame_slider: gr.Slider(maximum=v2_frames, value=1), 
+            self.video1_info: self.get_video_info_html(current_state, vid1_path), 
+            self.video2_info: self.get_video_info_html(current_state, vid2_path) 
+        }
 
     def send_selected_frames_to_generator(self, vid1_path, frame1_num, vid2_path, frame2_num, current_image_prompt_type):
         frame1 = self.get_video_frame(vid1_path, int(frame1_num) - 1, return_PIL=True)
