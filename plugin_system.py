@@ -222,7 +222,21 @@ class WAN2GPApplication:
             self.plugin_manager.load_plugins_from_directory(plugins_dir)
         except Exception as e:
             print(f"Error initializing plugin manager: {str(e)}")
+            import traceback
             traceback.print_exc()
+
+    def setup_plugins_ui(self, main_module_globals: Dict[str, Any]):
+        self.initialize_plugin_manager()
+        if self.plugin_manager:
+            self.plugin_manager.inject_globals(main_module_globals)
+            plugin_ui = self.plugin_manager.setup_ui()
+            plugin_tabs = plugin_ui.get('tabs', {})
+            sorted_plugin_tabs = sorted(
+                plugin_tabs.items(),
+                key=lambda x: x[1].get('position', -1)
+            )
+            return sorted_plugin_tabs
+        return []
 
     def run_post_ui_setup(self):
         if hasattr(self, 'ui_components') and self.plugin_manager:
