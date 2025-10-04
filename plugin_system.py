@@ -24,6 +24,7 @@ class WAN2GPPlugin:
         self.name = self.__class__.__name__
         self.version = "1.0.0"
         self._component_requests: List[str] = []
+        self._global_requests: List[str] = []
         self._insert_after_requests: List[InsertAfterRequest] = []
         self._setup_complete = False
         
@@ -36,10 +37,16 @@ class WAN2GPPlugin:
     def request_component(self, component_id: str) -> None:
         if component_id not in self._component_requests:
             self._component_requests.append(component_id)
-            
+    def request_global(self, global_name: str) -> None:
+        if global_name not in self._global_requests:
+            self._global_requests.append(global_name)
     @property
     def component_requests(self) -> List[str]:
         return self._component_requests.copy()
+
+    @property
+    def global_requests(self) -> List[str]:
+        return self._global_requests.copy()
 
     def insert_after(self, target_component_id: str, new_component_constructor: callable) -> None:
         if not hasattr(self, '_insert_after_requests'):
@@ -104,7 +111,16 @@ class PluginManager:
     
     def get_all_plugins(self) -> Dict[str, WAN2GPPlugin]:
         return self.plugins.copy()
-    
+
+    def inject_globals(self, global_references: Dict[str, Any]) -> None:
+        for plugin_id, plugin in self.plugins.items():
+            try:
+                for global_name in plugin.global_requests:
+                    if global_name in global_references:
+                        setattr(plugin, global_name, global_references[global_name])
+            except Exception as e:
+                print(f"  [!] ERROR injecting globals for {plugin_id}: {str(e)}")
+
     def setup_ui(self) -> Dict[str, Dict[str, Any]]:
         tabs = {}
         
@@ -154,7 +170,6 @@ class PluginManager:
 
                         if new_value is not None:
                             component.value = new_value
-                            print(f"[PluginManager] Set initial value for component {type(component).__name__}")
                 
                 all_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
                 getattr(plugin, '_insert_after_requests', []).clear()

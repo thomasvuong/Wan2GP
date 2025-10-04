@@ -9883,6 +9883,26 @@ def create_ui():
         tab_state = gr.State({ "tab_no":0 }) 
 
         app.initialize_plugin_manager()
+        if app.plugin_manager:
+            global_references = {
+                "server_config": server_config,
+                "has_video_file_extension": has_video_file_extension,
+                "has_image_file_extension": has_image_file_extension,
+                "get_settings_from_file": get_settings_from_file,
+                "get_video_info": get_video_info,
+                "extract_audio_tracks": extract_audio_tracks,
+                "get_file_creation_date": get_file_creation_date,
+                "get_video_frame": get_video_frame,
+                "are_model_types_compatible": are_model_types_compatible,
+                "get_model_def": get_model_def,
+                "get_default_settings": get_default_settings,
+                "add_to_sequence": add_to_sequence,
+                "set_model_settings": set_model_settings,
+                "generate_dropdown_model_list": generate_dropdown_model_list,
+                "get_unique_id": get_unique_id,
+                "args": args
+            }
+            app.plugin_manager.inject_globals(global_references)
         plugin_ui = app.plugin_manager.setup_ui() if app.plugin_manager else {}
         plugin_tabs = plugin_ui.get('tabs', {})
 
