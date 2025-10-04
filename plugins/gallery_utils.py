@@ -42,7 +42,7 @@ if os.name == 'nt':
     DeleteObject.argtypes = [ctypes.c_void_p]
     DeleteObject.restype = wintypes.BOOL
 
-    def get_thumbnail_as_base64(file_path, size=256):
+    def get_thumbnail_as_base64(file_path, size=128):
         hbitmap_handle = 0
         bmp_copy = None
         factory_ptr = None
