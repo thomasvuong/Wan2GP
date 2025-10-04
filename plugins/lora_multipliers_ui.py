@@ -120,7 +120,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
                         multipliers_per_step = steps_and_phases_str.split(',')
 
-                        steps_per_split_base = total_steps // num_splits_for_this_lora
+                        steps_per_split_base = total_steps
                         remainder = total_steps % num_splits_for_this_lora
                         start_step = 0
                         
