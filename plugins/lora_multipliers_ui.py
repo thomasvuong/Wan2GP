@@ -13,15 +13,11 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
         self.request_component("main")
 
     def post_ui_setup(self, components: dict) -> dict:
-        loras_multipliers = components.get("loras_multipliers")
-        loras_choices = components.get("loras_choices")
-        guidance_phases = components.get("guidance_phases")
-        num_inference_steps = components.get("num_inference_steps")
-        main_ui_block = components.get("main")
-
-        if not all([loras_multipliers, loras_choices, guidance_phases, num_inference_steps, main_ui_block]):
-            print("LoraMultipliersUIPlugin: Could not find all required components. UI will not be created.")
-            return {}
+        loras_multipliers = self.loras_multipliers
+        loras_choices = self.loras_choices
+        guidance_phases = self.guidance_phases
+        num_inference_steps = self.num_inference_steps
+        main_ui_block = self.main
 
         def create_and_wire_ui():
             MAX_LORA_SLIDERS = 15
