@@ -1,5 +1,5 @@
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 import os
 import re
 from PIL import Image

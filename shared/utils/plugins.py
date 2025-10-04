@@ -217,7 +217,7 @@ class WAN2GPApplication:
     def initialize_plugin_manager(self) -> None:
         try:
             self.plugin_manager = PluginManager()
-            plugins_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+            plugins_dir = os.path.join(os.getcwd(), "plugins")
             os.makedirs(plugins_dir, exist_ok=True)
             self.plugin_manager.load_plugins_from_directory(plugins_dir)
         except Exception as e:

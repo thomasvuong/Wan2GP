@@ -1,5 +1,5 @@
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 
 class LoraMultipliersUIPlugin(WAN2GPPlugin):
     def __init__(self):
