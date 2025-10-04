@@ -68,72 +68,12 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 }
             </style>
             """
-            
-            def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts, triggered_lora_index=-1):
-                if triggered_lora_index != -1:
-                    if current_split_counts[triggered_lora_index] < MAX_STEP_SPLITS:
-                        current_split_counts[triggered_lora_index] += 1
-                elif triggered_lora_index == -1:
-                    current_split_counts = [1] * MAX_LORA_SLIDERS
-                
-                ui_updates = []
-                textbox_strings = []
-                multipliers_per_lora = current_multipliers_str.split(' ')
 
-                for i in range(MAX_LORA_SLIDERS):
-                    if i < len(selected_lora_indices):
-                        lora_name = selected_lora_indices[i]
-                        ui_updates.extend([gr.update(visible=True), gr.update(value=f"### {lora_name}")])
-                        
-                        num_splits_for_this_lora = current_split_counts[i]
-                        steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
-                        multipliers_per_step = steps_and_phases_str.split(',')
-
-                        steps_per_split = total_steps
-                        remainder = total_steps % num_splits_for_this_lora
-                        start_step = 0
-                        
-                        lora_step_strings = []
-                        for j in range(MAX_STEP_SPLITS):
-                            if j < num_splits_for_this_lora:
-                                end_step = start_step + steps_per_split + (1 if j < remainder else 0)
-                                step_title = f"**Steps {start_step + 1} to {end_step}**"
-                                start_step = end_step
-                                ui_updates.extend([gr.update(visible=True), gr.update(value=step_title)])
-                                
-                                multipliers_per_phase = multipliers_per_step[j].split(';') if j < len(multipliers_per_step) else ['1.0'] * 3
-                                phase_values_for_textbox = []
-                                
-                                for k in range(3):
-                                    try: phase_value = float(multipliers_per_phase[k])
-                                    except (ValueError, IndexError): phase_value = 1.0
-                                    
-                                    is_visible = (k + 1) <= guidance_phases_val
-                                    ui_updates.append(gr.update(visible=is_visible, value=phase_value))
-                                    if is_visible:
-                                        formatted_value = str(int(phase_value)) if phase_value == int(phase_value) else f"{phase_value:.2f}".rstrip('0').rstrip('.')
-                                        phase_values_for_textbox.append(formatted_value)
-                                
-                                if phase_values_for_textbox:
-                                    lora_step_strings.append(";".join(phase_values_for_textbox))
-                            else:
-                                ui_updates.extend([gr.update(visible=False), gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
-                        
-                        if lora_step_strings:
-                            textbox_strings.append(",".join(lora_step_strings))
-                    else:
-                        ui_updates.extend([gr.update(visible=False), gr.update(value="")])
-                        for _ in range(MAX_STEP_SPLITS):
-                            ui_updates.extend([gr.update(visible=False), gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
-                
-                new_textbox_value = " ".join(textbox_strings)
-                return [current_split_counts, gr.update(value=new_textbox_value)] + ui_updates
-
-            def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, *all_slider_values_flat):
+            def _build_multipliers_string(num_selected_loras, guidance_phases_val, split_counts, all_slider_values_flat):
                 textbox_strings = []
                 slider_cursor = 0
                 for i in range(MAX_LORA_SLIDERS):
-                    if i < len(selected_loras):
+                    if i < num_selected_loras:
                         num_splits_for_this_lora = split_counts[i]
                         lora_step_strings = []
                         for j in range(MAX_STEP_SPLITS):
@@ -145,14 +85,80 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                         phase_value = all_slider_values_flat[slider_cursor + k]
                                         formatted_value = str(int(phase_value)) if phase_value == int(phase_value) else f"{phase_value:.2f}".rstrip('0').rstrip('.')
                                         phase_values_for_textbox.append(formatted_value)
+                            
                             if phase_values_for_textbox:
                                 lora_step_strings.append(";".join(phase_values_for_textbox))
                             slider_cursor += 3
+                        
                         if lora_step_strings:
                             textbox_strings.append(",".join(lora_step_strings))
                     else:
                         slider_cursor += MAX_STEP_SPLITS * 3
-                new_textbox_value = " ".join(textbox_strings)
+                        
+                return " ".join(textbox_strings)
+
+            def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts, triggered_lora_index=-1):
+                if triggered_lora_index != -1:
+                    if current_split_counts[triggered_lora_index] < MAX_STEP_SPLITS:
+                        current_split_counts[triggered_lora_index] += 1
+                elif triggered_lora_index == -1:
+                    current_split_counts = [1] * MAX_LORA_SLIDERS
+                
+                ui_updates = []
+                all_slider_values_flat = []
+                multipliers_per_lora = current_multipliers_str.split(' ')
+
+                for i in range(MAX_LORA_SLIDERS):
+                    is_lora_visible = i < len(selected_lora_indices)
+                    ui_updates.append(gr.update(visible=is_lora_visible))
+                    
+                    if is_lora_visible:
+                        lora_name = selected_lora_indices[i]
+                        ui_updates.append(gr.update(value=f"### {lora_name}"))
+                        
+                        num_splits_for_this_lora = current_split_counts[i]
+                        steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
+                        multipliers_per_step = steps_and_phases_str.split(',')
+
+                        steps_per_split_base = total_steps // num_splits_for_this_lora
+                        remainder = total_steps % num_splits_for_this_lora
+                        start_step = 0
+                        
+                        for j in range(MAX_STEP_SPLITS):
+                            is_split_visible = j < num_splits_for_this_lora
+                            ui_updates.append(gr.update(visible=is_split_visible))
+
+                            if is_split_visible:
+                                steps_in_this_split = steps_per_split_base + (1 if j < remainder else 0)
+                                end_step = start_step + steps_in_this_split
+                                step_title = f"**Steps {start_step + 1} to {end_step}**"
+                                start_step = end_step
+                                ui_updates.append(gr.update(value=step_title))
+                                
+                                multipliers_per_phase = multipliers_per_step[j].split(';') if j < len(multipliers_per_step) else ['1.0'] * 3
+                                
+                                for k in range(3):
+                                    try: phase_value = float(multipliers_per_phase[k])
+                                    except (ValueError, IndexError): phase_value = 1.0
+                                    
+                                    is_slider_visible = (k + 1) <= guidance_phases_val
+                                    ui_updates.append(gr.update(visible=is_slider_visible, value=phase_value))
+                                    all_slider_values_flat.append(phase_value)
+                            else:
+                                ui_updates.extend([gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
+                                all_slider_values_flat.extend([1.0] * 3)
+                    else:
+                        ui_updates.append(gr.update(value=""))
+                        for _ in range(MAX_STEP_SPLITS):
+                            ui_updates.extend([gr.update(visible=False), gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
+                            all_slider_values_flat.extend([1.0] * 3 * MAX_STEP_SPLITS)
+
+                new_textbox_value = _build_multipliers_string(len(selected_lora_indices), guidance_phases_val, current_split_counts, all_slider_values_flat)
+                
+                return [current_split_counts, gr.update(value=new_textbox_value)] + ui_updates
+
+            def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, *all_slider_values_flat):
+                new_textbox_value = _build_multipliers_string(len(selected_loras), guidance_phases_val, split_counts, all_slider_values_flat)
                 return gr.update(value=new_textbox_value)
 
             with gr.Accordion("Dynamic Lora Multipliers Adjustments", open=True) as main_accordion:
