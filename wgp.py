@@ -7491,6 +7491,7 @@ def download_lora(state, lora_url, progress=gr.Progress(track_tqdm=True),):
 
 def generate_video_tab(update_form = False, state_dict = None, ui_defaults = None, model_family = None, model_choice = None, header = None, main = None, main_tabs= None):
     global inputs_names #, advanced
+    plugin_data = gr.State({})
 
     if update_form:
         model_filename = state_dict["model_filename"]
@@ -7510,7 +7511,6 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         gen = dict()
         gen["queue"] = []
         state_dict["gen"] = gen
-        plugin_data = gr.State({})
     model_def = get_model_def(model_type)
     if model_def == None: model_def = {} 
     base_model_type = get_base_model_type(model_type)
@@ -8519,7 +8519,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                                       min_frames_if_references_col, video_prompt_type_alignment, prompt_enhancer_btn, tab_inpaint, tab_t2v] + image_start_extra + image_end_extra + image_refs_extra #  presets_column,
         if update_form:
             locals_dict = locals()
-            gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict] + extra_inputs
+            gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict, plugin_data] + extra_inputs
             return gen_inputs
         else:
             target_state = gr.Text(value = "state", interactive= False, visible= False)
