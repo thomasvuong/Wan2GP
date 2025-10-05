@@ -54,6 +54,7 @@ from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
 from shared.utils.plugins import PluginManager, WAN2GPApplication
+
 # import torch._dynamo as dynamo
 # dynamo.config.recompile_limit = 2000   # default is 256
 # dynamo.config.accumulated_recompile_limit = 2000  # or whatever limit you want
