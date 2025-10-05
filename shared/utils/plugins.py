@@ -245,6 +245,9 @@ class WAN2GPApplication:
 
     def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components: Dict[str, Any]):
         self._create_plugin_tabs(main_module_globals)
-        self.ui_components = all_ui_components
+        self.ui_components = { 
+            name: obj for name, obj in all_ui_components.items() 
+            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion)) 
+        }
         if self.plugin_manager:
             self.plugin_manager.run_post_ui_setup(self.ui_components)

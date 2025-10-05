@@ -8878,9 +8878,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 outputs=[modal_container]
             )
 
-    tab_locals_dict = { name: obj for name, obj in locals().items() if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion)) }
-
-    return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, tab_locals_dict,
+    return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, locals(),
             #  video_guide, image_guide, video_mask, image_mask, image_refs,   
             ) 
  
