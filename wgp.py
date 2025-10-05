@@ -9880,9 +9880,7 @@ def create_ui():
         gr.Markdown(f"<div align=center><H1>Wan<SUP>GP</SUP> v{WanGP_version} <FONT SIZE=4>by <I>DeepBeepMeep</I></FONT> <FONT SIZE=3>") # (<A HREF='https://github.com/deepbeepmeep/Wan2GP'>Updates</A>)</FONT SIZE=3></H1></div>")
         global model_list
 
-        tab_state = gr.State({ "tab_no":0 }) 
-
-        sorted_plugin_tabs = app.setup_plugins_ui(globals())
+        tab_state = gr.State({ "tab_no":0 })
 
         with gr.Tabs(selected="video_gen", ) as main_tabs:
             with gr.Tab("Video Generator", id="video_gen") as video_generator_tab:
@@ -9916,15 +9914,12 @@ def create_ui():
             with gr.Tab("About"):
                 generate_about_tab()
 
-            for tab_id, tab_info in sorted_plugin_tabs:
-                with gr.Tab(tab_info['label'], id=f"plugin_{tab_id}"):
-                    tab_info['component_constructor']()
+            app.finalize_ui_setup(globals(), generate_tab_components)
+
         if stats_app is not None:
             stats_app.setup_events(main, state)
         main_tabs.select(fn=select_tab, inputs= [tab_state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
 
-        app.ui_components = generate_tab_components
-        app.run_post_ui_setup()
         return main
 
 if __name__ == "__main__":
