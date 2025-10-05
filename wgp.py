@@ -9897,7 +9897,7 @@ def create_ui():
                         stats_element = stats_app.get_gradio_element()
 
                 with gr.Row():
-                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, generate_tab_components
+                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, tab_components
                         # video_guide, image_guide, video_mask, image_mask, image_refs, 
                     ) = generate_video_tab(model_family=model_family, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs)
             with gr.Tab("Guides", id="info") as info_tab:
@@ -9912,7 +9912,7 @@ def create_ui():
             with gr.Tab("About"):
                 generate_about_tab()
 
-            app.finalize_ui_setup(globals(), generate_tab_components)
+            app.finalize_ui_setup(globals(), tab_components)
 
         if stats_app is not None:
             stats_app.setup_events(main, state)
