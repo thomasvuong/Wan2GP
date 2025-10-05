@@ -5,7 +5,7 @@ import re
 from PIL import Image
 import gc
 
-from plugins.gallery_utils import get_thumbnails_in_batch_windows
+from .gallery_utils import get_thumbnails_in_batch_windows
 
 class GalleryPlugin(WAN2GPPlugin):
     def __init__(self):

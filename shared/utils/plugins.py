@@ -6,6 +6,13 @@ from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass
 import gradio as gr
 import traceback
+import subprocess
+try:
+    import git
+except ImportError:
+    print("Git not found. Installing...")
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'gitpython'])
+    import git
 
 @dataclass
 class InsertAfterRequest:
@@ -38,9 +45,11 @@ class WAN2GPPlugin:
     def request_component(self, component_id: str) -> None:
         if component_id not in self._component_requests:
             self._component_requests.append(component_id)
+            
     def request_global(self, global_name: str) -> None:
         if global_name not in self._global_requests:
             self._global_requests.append(global_name)
+            
     @property
     def component_requests(self) -> List[str]:
         return self._component_requests.copy()
@@ -63,53 +72,82 @@ class WAN2GPPlugin:
         return {}
 
 class PluginManager:
-    def __init__(self):
+    def __init__(self, plugins_dir="plugins"):
         self.plugins: Dict[str, WAN2GPPlugin] = {}
-        self._load_builtin_plugins()
+        self.plugins_dir = plugins_dir
+        os.makedirs(self.plugins_dir, exist_ok=True)
         
-    def _load_builtin_plugins(self) -> None:
-        pass
-    
-    def load_plugin(self, plugin_path: str) -> bool:
+    def install_plugin_from_url(self, git_url: str):
+        if not git_url or not git_url.startswith("https://github.com/"):
+            return "[Error] Invalid GitHub URL."
+
         try:
-            module_name = os.path.splitext(os.path.basename(plugin_path))[0]
+            repo_name = git_url.split('/')[-1].replace('.git', '')
+            target_dir = os.path.join(self.plugins_dir, repo_name)
+
+            if os.path.exists(target_dir):
+                return f"[Warning] Plugin '{repo_name}' already exists. Please remove it manually to reinstall."
+
+            gr.Info(f"Cloning '{repo_name}' into '{target_dir}'...")
+            git.Repo.clone_from(git_url, target_dir)
+
+            requirements_path = os.path.join(target_dir, 'requirements.txt')
+            if os.path.exists(requirements_path):
+                gr.Info(f"Installing dependencies for '{repo_name}'...")
+                try:
+                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
+                except subprocess.CalledProcessError as e:
+                    return f"[Error] Failed to install dependencies for {repo_name}. Check console for details. Error: {e}"
+
+            setup_path = os.path.join(target_dir, 'setup.py')
+            if os.path.exists(setup_path):
+                gr.Info(f"Running setup for '{repo_name}'...")
+                try:
+                    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-e', target_dir])
+                except subprocess.CalledProcessError as e:
+                    return f"[Error] Failed to run setup.py for {repo_name}. Check console for details. Error: {e}"
             
-            spec = importlib.util.spec_from_file_location(f"wan2gp_plugins.{module_name}", plugin_path)
-            if spec is None or spec.loader is None:
-                print(f"Error: Could not load plugin {plugin_path}")
-                return False
-                
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-            
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                if issubclass(obj, WAN2GPPlugin) and obj != WAN2GPPlugin:
-                    plugin = obj()
-                    plugin.setup_ui()
-                    self.plugins[module_name] = plugin
-                    print(f"Loaded plugin: {plugin.name}")
-                    return True
-            return False
-            
+            init_path = os.path.join(target_dir, '__init__.py')
+            if not os.path.exists(init_path):
+                with open(init_path, 'w') as f:
+                    pass
+
+            return f"[Success] Plugin '{repo_name}' installed. Please enable it in the list and restart WanGP."
+
+        except git.exc.GitCommandError as e:
+            return f"[Error] Git clone failed: {e.stderr}"
         except Exception as e:
-            print(f"Error loading plugin {plugin_path}: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def load_plugins_from_directory(self, directory: str) -> None:
-        if not os.path.isdir(directory):
-            os.makedirs(directory, exist_ok=True)
-            return
-            
-        for filename in os.listdir(directory):
-            if filename.endswith('.py') and not filename.startswith('_'):
-                self.load_plugin(os.path.join(directory, filename))
-    
-    def get_plugin(self, plugin_id: str) -> Optional[WAN2GPPlugin]:
-        return self.plugins.get(plugin_id)
-    
+            return f"[Error] An unexpected error occurred: {str(e)}"
+
+    def discover_plugins(self) -> List[str]:
+        discovered = []
+        for item in os.listdir(self.plugins_dir):
+            path = os.path.join(self.plugins_dir, item)
+            if os.path.isdir(path) and os.path.exists(os.path.join(path, '__init__.py')):
+                discovered.append(item)
+        return sorted(discovered)
+
+    def load_plugins_from_directory(self, enabled_plugins: List[str]) -> None:
+        if self.plugins_dir not in sys.path:
+            sys.path.insert(0, self.plugins_dir)
+
+        for plugin_dir_name in self.discover_plugins():
+            if plugin_dir_name not in enabled_plugins:
+                continue
+            try:
+                module = importlib.import_module(f"{plugin_dir_name}.plugin")
+
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, WAN2GPPlugin) and obj != WAN2GPPlugin:
+                        plugin = obj()
+                        plugin.setup_ui()
+                        self.plugins[plugin_dir_name] = plugin
+                        print(f"Loaded plugin: {plugin.name} (from {plugin_dir_name})")
+                        break
+            except Exception as e:
+                print(f"Error loading plugin from directory {plugin_dir_name}: {e}")
+                traceback.print_exc()
+
     def get_all_plugins(self) -> Dict[str, WAN2GPPlugin]:
         return self.plugins.copy()
 
@@ -124,7 +162,6 @@ class PluginManager:
 
     def setup_ui(self) -> Dict[str, Dict[str, Any]]:
         tabs = {}
-        
         for plugin_id, plugin in self.plugins.items():
             try:
                 for tab_id, tab in plugin.tabs.items():
@@ -135,9 +172,6 @@ class PluginManager:
                     }
             except Exception as e:
                 print(f"Error in setup_ui for plugin {plugin_id}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                
         return {'tabs': tabs}
 
     def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
@@ -154,83 +188,45 @@ class PluginManager:
                     for comp_id in plugin.component_requests
                     if comp_id in all_components
                 }
-
-                updates = plugin.post_ui_setup(requested_components)
-                if updates:
-                    for component, update_instruction in updates.items():
-                        new_value = None
-                        if isinstance(update_instruction, dict) and update_instruction.get("__type__") == "update":
-                            if 'value' in update_instruction:
-                                new_value = update_instruction['value']
-                        elif isinstance(update_instruction, gr.components.Component):
-                            if hasattr(update_instruction, 'value'):
-                                print(f"Warning: Plugin '{plugin.name}' is returning a new component instance for a value update. Please use gr.update(value=...) instead.")
-                                new_value = getattr(update_instruction, 'value')
-                        else:
-                            new_value = update_instruction
-
-                        if new_value is not None:
-                            component.value = new_value
-                
+                plugin.post_ui_setup(requested_components)
                 all_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
-                getattr(plugin, '_insert_after_requests', []).clear()
-
+                
             except Exception as e:
                 print(f"[PluginManager] Error in post_ui_setup for {plugin_id}: {str(e)}")
+                traceback.print_exc()
 
         if all_insert_requests:
             for request in all_insert_requests:
-                target_id = request.target_component_id
-                constructor = request.new_component_constructor
-                
                 try:
-                    if target_id not in all_components:
-                        print(f"[PluginManager] ERROR: Target '{target_id}' for insertion not found.")
+                    target = all_components.get(request.target_component_id)
+                    parent = getattr(target, 'parent', None)
+                    if not target or not parent or not hasattr(parent, 'children'):
+                        print(f"[PluginManager] ERROR: Target '{request.target_component_id}' for insertion not found or invalid.")
                         continue
                         
-                    target = all_components[target_id]
-                    parent = getattr(target, 'parent', None)
-                    if parent is None or not hasattr(parent, 'children'):
-                        continue
-
-                    children = list(parent.children)
-                    target_index = children.index(target)
-
+                    target_index = parent.children.index(target)
                     with parent:
-                        new_component = constructor()
-
-                    newly_added_component = parent.children.pop(-1)
-                    parent.children.insert(target_index + 1, newly_added_component)
-
-                    print(f"[PluginManager] Successfully inserted {type(new_component).__name__} after {target_id}")
+                        new_component = request.new_component_constructor()
+                    
+                    newly_added = parent.children.pop(-1)
+                    parent.children.insert(target_index + 1, newly_added)
+                    print(f"[PluginManager] Successfully inserted component after '{request.target_component_id}'")
 
                 except Exception as e:
-                    print(f"[PluginManager] Error processing insert_after for {target_id}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
+                    print(f"[PluginManager] Error processing insert_after for {request.target_component_id}: {str(e)}")
 
 class WAN2GPApplication:
     def __init__(self):
-        self.plugin_manager = None
+        self.plugin_manager = PluginManager()
         self.ui_components = {}
 
-    def initialize_plugin_manager(self) -> None:
-        try:
-            self.plugin_manager = PluginManager()
-            plugins_dir = os.path.join(os.getcwd(), "plugins")
-            os.makedirs(plugins_dir, exist_ok=True)
-            self.plugin_manager.load_plugins_from_directory(plugins_dir)
-        except Exception as e:
-            print(f"Error initializing plugin manager: {str(e)}")
-            traceback.print_exc()
-
     def _create_plugin_tabs(self, main_module_globals: Dict[str, Any]):
-        self.initialize_plugin_manager()
         if not self.plugin_manager:
             return
-
+        server_config = main_module_globals.get('server_config', {})
+        enabled_plugins = server_config.get("enabled_plugins", [])
+        self.plugin_manager.load_plugins_from_directory(enabled_plugins)
         self.plugin_manager.inject_globals(main_module_globals)
-        
         plugin_ui = self.plugin_manager.setup_ui()
         plugin_tabs = plugin_ui.get('tabs', {})
         
