@@ -3527,7 +3527,7 @@ def select_video(state, input_file_list, event_data: gr.EventData):
             control_net_weight_alt_name = model_def.get("control_net_weight_alt_name", "")
             if len(control_net_weight_alt_name) >0:
                 if len(control_net_weight): control_net_weight += ", "
-                control_net_weight += control_net_weight_alt_name + "=" + str(configs.get("control_net_alt", 1))
+                control_net_weight += control_net_weight_alt_name + "=" + str(configs.get("control_net_weight_alt", 1))
             if len(control_net_weight) > 0: 
                 values += [control_net_weight]
                 labels += ["Control Net Weights"]      
@@ -6323,7 +6323,7 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
         pop += ["frames_positions", "control_net_weight", "control_net_weight2"] 
 
     if not len(model_def.get("control_net_weight_alt_name", "")) >0:
-        pop += ["control_net_alt"]
+        pop += ["control_net_weight_alt"]
                         
     if model_def.get("video_guide_outpainting", None) is None:
         pop += ["video_guide_outpainting"] 
