@@ -30,7 +30,7 @@ Every plugin must define a class that inherits from `WAN2GPPlugin`.
 
 ```python
 # in plugins/my_awesome_plugin.py
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 import gradio as gr
 
 class MyAwesomePlugin(WAN2GPPlugin):
@@ -93,7 +93,7 @@ This plugin adds a new tab with a simple "Hello World" interface. This is based 
 ```python
 # in plugins/greeter_plugin.py
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 
 class GreeterPlugin(WAN2GPPlugin):
     
@@ -135,7 +135,7 @@ This plugin demonstrates how to change the value of an existing component (`lora
 ```python
 # in plugins/simple_modifier_plugin.py
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 
 class SimpleModifierPlugin(WAN2GPPlugin):
     def __init__(self):
@@ -179,7 +179,7 @@ This example, inspired by `lora_multipliers_ui.py`, shows a more complex use cas
 ```python
 # in plugins/advanced_ui_plugin.py
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 
 class AdvancedUIPlugin(WAN2GPPlugin):
     def __init__(self):
@@ -237,7 +237,7 @@ This example, inspired by `gallery.py`, shows how to request and use functions a
 ```python
 # in plugins/global_access_plugin.py
 import gradio as gr
-from plugin_system import WAN2GPPlugin
+from shared.utils.plugins import WAN2GPPlugin
 
 class GlobalAccessPlugin(WAN2GPPlugin):
     def __init__(self):
