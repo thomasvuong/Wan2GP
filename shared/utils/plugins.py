@@ -296,6 +296,14 @@ class PluginManager:
         return data
 
     def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
+        if 'tab_state' not in all_components and 'main_tabs' in all_components:
+            main_tabs = all_components.get('main_tabs')
+            root_blocks = getattr(main_tabs, 'parent', None)
+            if root_blocks:
+                for component in getattr(root_blocks, 'children', []):
+                    if isinstance(component, gr.State):
+                        all_components['tab_state'] = component
+                        break
         all_insert_requests: List[InsertAfterRequest] = []
 
         for plugin_id, plugin in self.plugins.items():
