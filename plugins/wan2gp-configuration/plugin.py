@@ -3,22 +3,12 @@ from shared.utils.plugins import WAN2GPPlugin
 import json
 
 class ConfigTabPlugin(WAN2GPPlugin):
-    """
-    This plugin moves the original Configuration tab from the main UI into a modular plugin.
-    It reads the application's state and configuration, allows the user to modify them,
-    and provides options to save the new settings or save and restart the application.
-    """
     def __init__(self):
         super().__init__()
         self.name = "Configuration Tab"
         self.version = "1.0.0"
 
     def setup_ui(self):
-        """
-        Declares all the necessary components and global variables this plugin
-        needs to access from the main wgp.py application.
-        """
-        # Request global variables and functions from wgp.py
         self.request_global("args")
         self.request_global("server_config")
         self.request_global("server_config_filename")
@@ -41,12 +31,11 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.request_global("quit_application")
         self.request_global("release_model")
         self.request_global("get_sorted_dropdown")
+        self.request_global("app")
 
-        # Request components from the main UI that this plugin needs to interact with
         self.request_component("state")
         self.request_component("resolution")
 
-        # Register the new "Configuration" tab
         self.add_tab(
             tab_id="configuration",
             label="Configuration",
@@ -54,10 +43,6 @@ class ConfigTabPlugin(WAN2GPPlugin):
         )
 
     def create_config_ui(self):
-        """
-        Creates the Gradio UI for the Configuration tab.
-        The layout is based on the original `generate_configuration_tab` function.
-        """
         gr.Markdown("Please click 'Save' or 'Save and Restart' for changes to take effect. Some choices may be locked if set via command-line arguments.")
         with gr.Column():
             with gr.Tabs():
@@ -139,6 +124,18 @@ class ConfigTabPlugin(WAN2GPPlugin):
                     self.enhancer_mode_choice = gr.Dropdown(choices=[("Automatic on Generation", 0), ("On-Demand Button Only", 1)], value=self.server_config.get("enhancer_mode", 0), label="Prompt Enhancer Usage")
                     self.mmaudio_enabled_choice = gr.Dropdown(choices=[("Off", 0), ("Enabled (unloads after use)", 1), ("Enabled (persistent in RAM)", 2)], value=self.server_config.get("mmaudio_enabled", 0), label="MMAudio Soundtrack Generation (requires 10GB extra download)")
 
+                with gr.Tab("Plugins"):
+                    all_plugins_info = self.app.plugin_manager.get_plugins_info()
+                    plugin_choices = [(f"{p['name']} ({p['id']})", p['id']) for p in all_plugins_info]
+                    enabled_plugins_value = self.server_config.get("enabled_plugins", [])
+
+                    self.enabled_plugins_choice = gr.CheckboxGroup(
+                        choices=plugin_choices,
+                        value=enabled_plugins_value,
+                        label="Enabled Plugins (requires restart)",
+                        interactive=not self.args.lock_config
+                    )
+
                 with gr.Tab("Outputs"):
                     self.video_output_codec_choice = gr.Dropdown(choices=[("x265 CRF 28 (Balanced)", 'libx265_28'), ("x264 Level 8 (Balanced)", 'libx264_8'), ("x265 CRF 8 (High Quality)", 'libx265_8'), ("x264 Level 10 (High Quality)", 'libx264_10'), ("x264 Lossless", 'libx264_lossless')], value=self.server_config.get("video_output_codec", "libx264_8"), label="Video Codec")
                     self.image_output_codec_choice = gr.Dropdown(choices=[("JPEG Q85", 'jpeg_85'), ("WEBP Q85", 'webp_85'), ("JPEG Q95", 'jpeg_95'), ("WEBP Q95", 'webp_95'), ("WEBP Lossless", 'webp_lossless'), ("PNG Lossless", 'png')], value=self.server_config.get("image_output_codec", "jpeg_95"), label="Image Codec")
@@ -157,11 +154,9 @@ class ConfigTabPlugin(WAN2GPPlugin):
         return [self.release_RAM_btn]
 
     def _save_changes(self, state, *args):
-        """Saves the configuration to the JSON file."""
         if self.args.lock_config:
             return "<div style='color:red; text-align:center;'>Configuration is locked by command-line arguments.</div>"
         
-        # Unpack arguments
         (transformer_types_choices, transformer_dtype_policy_choice, text_encoder_quantization_choice,
          VAE_precision_choice, mixed_precision_choice, save_path_choice, image_save_path_choice,
          attention_choice, compile_choice, profile_choice, vae_config_choice, metadata_choice,
@@ -170,7 +165,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
          fit_canvas_choice, preload_in_VRAM_choice, depth_anything_v2_variant_choice,
          notification_sound_enabled_choice, notification_sound_volume_choice, max_frames_multiplier_choice,
          display_stats_choice, video_output_codec_choice, image_output_codec_choice, audio_output_codec_choice,
-         last_resolution_choice) = args
+         enabled_plugins_choice, last_resolution_choice) = args
 
         new_server_config = {
             "attention_mode": attention_choice, "transformer_types": transformer_types_choices,
@@ -189,12 +184,12 @@ class ConfigTabPlugin(WAN2GPPlugin):
             "max_frames_multiplier": max_frames_multiplier_choice, "display_stats": display_stats_choice,
             "video_output_codec": video_output_codec_choice, "image_output_codec": image_output_codec_choice,
             "audio_output_codec": audio_output_codec_choice,
+            "enabled_plugins": enabled_plugins_choice,
             "last_model_type": state["model_type"], "last_model_per_family": state["last_model_per_family"],
             "last_advanced_choice": state["advanced"], "last_resolution_choice": last_resolution_choice,
             "last_resolution_per_group": state["last_resolution_per_group"],
         }
         
-        # Retain original values for settings locked by CLI arguments
         if self.args.lock_config:
             if "attention_mode" in self.server_config: new_server_config["attention_mode"] = self.server_config["attention_mode"]
             if "compile" in self.server_config: new_server_config["compile"] = self.server_config["compile"]
@@ -205,18 +200,14 @@ class ConfigTabPlugin(WAN2GPPlugin):
         return "<div style='color:green; text-align:center;'>Settings saved. Please restart the application for all changes to take effect.</div>"
 
     def _save_and_restart(self, *args):
-        """Saves the configuration and then triggers the application shutdown."""
         self._save_changes(*args)
         gr.Info("Settings saved. Restarting application...")
-        # This function is requested from wgp.py and will handle the shutdown sequence
         self.quit_application()
 
     def post_ui_setup(self, components: dict):
-        """Connects the UI components to their corresponding functions after the main UI is built."""
         state = components['state']
         resolution = components['resolution']
-        
-        # Gather all input components for the save functions in the correct order
+
         inputs = [
             state, self.transformer_types_choices, self.transformer_dtype_policy_choice,
             self.text_encoder_quantization_choice, self.VAE_precision_choice, self.mixed_precision_choice,
@@ -226,7 +217,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
             self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice, self.fit_canvas_choice,
             self.preload_in_VRAM_choice, self.depth_anything_v2_variant_choice, self.notification_sound_enabled_choice,
             self.notification_sound_volume_choice, self.max_frames_multiplier_choice, self.display_stats_choice,
-            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, resolution
+            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, self.enabled_plugins_choice, resolution
         ]
 
         self.apply_btn.click(
