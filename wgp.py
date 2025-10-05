@@ -1827,7 +1827,7 @@ if not Path(server_config_filename).is_file():
         "profile" : profile_type.LowRAM_LowVRAM,
         "preload_model_policy": [],
         "UI_theme": "default",
-        "enabled_plugins": ["wan2gp-gallery", "wan2gp-lora-multipliers-ui"]
+        "enabled_plugins": ["wan2gp-gallery", "wan2gp-lora-multipliers-ui", "wan2gp-plugin-manager"]
     }
 
     with open(server_config_filename, "w", encoding="utf-8") as writer:
@@ -1837,7 +1837,7 @@ else:
         text = reader.read()
     server_config = json.loads(text)
     if "enabled_plugins" not in server_config:
-        server_config["enabled_plugins"] = ["wan2gp-gallery", "wan2gp-lora-multipliers-ui"]
+        server_config["enabled_plugins"] = ["wan2gp-gallery", "wan2gp-lora-multipliers-ui", "wan2gp-plugin-manager"]
 
 #   Deprecated models
 for path in  ["wan2.1_Vace_1.3B_preview_bf16.safetensors", "sky_reels2_diffusion_forcing_1.3B_bf16.safetensors","sky_reels2_diffusion_forcing_720p_14B_bf16.safetensors",
@@ -8899,65 +8899,6 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             #  video_guide, image_guide, video_mask, image_mask, image_refs,   
             ) 
  
-def generate_plugins_tab():
-    if not app.plugin_manager:
-        gr.Markdown("## Plugin Manager could not be initialized.")
-        return
-
-    def save_plugin_settings(enabled_plugins):
-        global server_config
-        server_config["enabled_plugins"] = enabled_plugins
-        with open(server_config_filename, "w", encoding="utf-8") as writer:
-            writer.write(json.dumps(server_config, indent=4))
-        gr.Info("Plugin settings saved. Please restart WanGP to apply changes.")
-        return gr.update(value=enabled_plugins)
-
-    def install_plugin(url, progress=gr.Progress()):
-        progress(0, desc="Starting installation...")
-        result_message = app.plugin_manager.install_plugin_from_url(url)
-        
-        if "[Success]" in result_message:
-            gr.Info(result_message)
-        else:
-            gr.Warning(result_message)
-        
-        all_plugins = app.plugin_manager.discover_plugins()
-        enabled_plugins_val = server_config.get("enabled_plugins", [])
-        return gr.update(choices=all_plugins, value=enabled_plugins_val), ""
-
-    all_plugins = app.plugin_manager.discover_plugins()
-    enabled_plugins = server_config.get("enabled_plugins", [])
-    
-    with gr.Column():
-        gr.Markdown("## Plugin Management")
-        gr.Markdown("Enable or disable plugins below. **A restart of the WanGP application is required for changes to take effect.**")
-        
-        with gr.Group():
-            enabled_plugins_checkboxes = gr.CheckboxGroup(
-                choices=all_plugins, value=enabled_plugins, label="Available Plugins"
-            )
-            save_plugins_button = gr.Button("Save Settings", variant="primary")
-
-        gr.Markdown("---")
-        gr.Markdown("## Install New Plugin")
-        gr.Markdown("Enter the URL of a GitHub repository containing a Wan2GP plugin. The plugin will be downloaded into your `plugins` directory.")
-        
-        with gr.Group():
-            plugin_url_textbox = gr.Textbox(label="GitHub URL", placeholder="https://github.com/user/wan2gp-plugin-repo")
-            install_plugin_button = gr.Button("Download and Install Plugin")
-    
-    save_plugins_button.click(
-        fn=save_plugin_settings,
-        inputs=[enabled_plugins_checkboxes],
-        outputs=[enabled_plugins_checkboxes]
-    )
-    
-    install_plugin_button.click(
-        fn=install_plugin,
-        inputs=[plugin_url_textbox],
-        outputs=[enabled_plugins_checkboxes, plugin_url_textbox]
-    )
-
 
 def generate_download_tab(lset_name,loras_choices, state):
     with gr.Row():
@@ -9976,8 +9917,6 @@ def create_ui():
                     (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, tab_components
                         # video_guide, image_guide, video_mask, image_mask, image_refs, 
                     ) = generate_video_tab(model_family=model_family, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs)
-            with gr.Tab("Plugins", id="plugins"):
-                generate_plugins_tab()
             with gr.Tab("Guides", id="info") as info_tab:
                 generate_info_tab()
             with gr.Tab("Video Mask Creator", id="video_mask_creator") as video_mask_creator:

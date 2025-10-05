@@ -1,5 +1,6 @@
 import os
 import sys
+import importlib
 import importlib.util
 import inspect
 from typing import Dict, Any, Optional, List, Union
@@ -8,6 +9,7 @@ import gradio as gr
 import traceback
 import subprocess
 import git
+import shutil
 
 @dataclass
 class InsertAfterRequest:
@@ -77,8 +79,106 @@ class PluginManager:
         self.plugins: Dict[str, WAN2GPPlugin] = {}
         self.plugins_dir = plugins_dir
         os.makedirs(self.plugins_dir, exist_ok=True)
+        if self.plugins_dir not in sys.path:
+            sys.path.insert(0, self.plugins_dir)
         self.data_hooks: Dict[str, List[callable]] = {}
+
+    def get_plugins_info(self) -> List[Dict[str, str]]:
+        plugins_info = []
+        for dir_name in self.discover_plugins():
+            plugin_path = os.path.join(self.plugins_dir, dir_name)
+            info = {'id': dir_name, 'name': dir_name, 'version': 'N/A', 'path': plugin_path}
+            try:
+                # Use import_module, which correctly handles packages and relative imports
+                module = importlib.import_module(f"{dir_name}.plugin")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, WAN2GPPlugin) and obj != WAN2GPPlugin:
+                        instance = obj()
+                        info['name'] = instance.name
+                        info['version'] = instance.version
+                        break
+            except Exception as e:
+                print(f"Could not load metadata for plugin {dir_name}: {e}")
+            plugins_info.append(info)
+        return plugins_info
+
+    def uninstall_plugin(self, plugin_id: str):
+        if not plugin_id:
+            return "[Error] No plugin selected for uninstallation."
         
+        target_dir = os.path.join(self.plugins_dir, plugin_id)
+        if not os.path.isdir(target_dir):
+            return f"[Error] Plugin '{plugin_id}' directory not found."
+
+        try:
+            shutil.rmtree(target_dir)
+            return f"[Success] Plugin '{plugin_id}' uninstalled. Please restart WanGP."
+        except Exception as e:
+            return f"[Error] Failed to remove plugin '{plugin_id}': {e}"
+
+    def update_plugin(self, plugin_id: str):
+        if not plugin_id:
+            return "[Error] No plugin selected for update."
+            
+        target_dir = os.path.join(self.plugins_dir, plugin_id)
+        if not os.path.isdir(os.path.join(target_dir, '.git')):
+            return f"[Error] '{plugin_id}' is not a git repository and cannot be updated automatically."
+
+        try:
+            gr.Info(f"Attempting to update '{plugin_id}'...")
+            repo = git.Repo(target_dir)
+            origin = repo.remotes.origin
+            origin.fetch()
+            
+            local_commit = repo.head.commit
+            remote_commit = origin.refs[repo.active_branch.name].commit
+
+            if local_commit == remote_commit:
+                 return f"[Info] Plugin '{plugin_id}' is already up to date."
+
+            origin.pull()
+            
+            requirements_path = os.path.join(target_dir, 'requirements.txt')
+            if os.path.exists(requirements_path):
+                gr.Info(f"Re-installing dependencies for '{plugin_id}'...")
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
+
+            return f"[Success] Plugin '{plugin_id}' updated. Please restart WanGP for changes to take effect."
+        except git.exc.GitCommandError as e:
+            return f"[Error] Git update failed for '{plugin_id}': {e.stderr}"
+        except Exception as e:
+            return f"[Error] An unexpected error occurred during update of '{plugin_id}': {str(e)}"
+
+    def reinstall_plugin(self, plugin_id: str):
+        if not plugin_id:
+            return "[Error] No plugin selected for reinstallation."
+
+        target_dir = os.path.join(self.plugins_dir, plugin_id)
+        if not os.path.isdir(target_dir):
+            return f"[Error] Plugin '{plugin_id}' not found."
+
+        git_url = None
+        if os.path.isdir(os.path.join(target_dir, '.git')):
+            try:
+                repo = git.Repo(target_dir)
+                git_url = repo.remotes.origin.url
+            except Exception as e:
+                return f"[Error] Could not get remote URL for '{plugin_id}': {e}"
+        
+        if not git_url:
+            return f"[Error] Could not determine remote URL for '{plugin_id}'. Cannot reinstall."
+
+        gr.Info(f"Reinstalling '{plugin_id}'...")
+        uninstall_msg = self.uninstall_plugin(plugin_id)
+        if "[Error]" in uninstall_msg:
+            return uninstall_msg
+        
+        install_msg = self.install_plugin_from_url(git_url)
+        if "[Success]" in install_msg:
+            return f"[Success] Plugin '{plugin_id}' reinstalled. Please restart WanGP."
+        else:
+            return f"[Error] Reinstallation failed during install step: {install_msg}"
+
     def install_plugin_from_url(self, git_url: str):
         if not git_url or not git_url.startswith("https://github.com/"):
             return "[Error] Invalid GitHub URL."
@@ -130,9 +230,6 @@ class PluginManager:
         return sorted(discovered)
 
     def load_plugins_from_directory(self, enabled_plugins: List[str]) -> None:
-        if self.plugins_dir not in sys.path:
-            sys.path.insert(0, self.plugins_dir)
-
         for plugin_dir_name in self.discover_plugins():
             if plugin_dir_name not in enabled_plugins:
                 continue
