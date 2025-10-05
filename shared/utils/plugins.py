@@ -7,12 +7,7 @@ from dataclasses import dataclass
 import gradio as gr
 import traceback
 import subprocess
-try:
-    import git
-except ImportError:
-    print("Git not found. Installing...")
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'gitpython'])
-    import git
+import git
 
 @dataclass
 class InsertAfterRequest:
