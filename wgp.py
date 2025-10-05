@@ -9911,13 +9911,10 @@ def create_ui():
                     generate_configuration_tab(state, main, header, model_family, model_choice, resolution, refresh_form_trigger)
             with gr.Tab("About"):
                 generate_about_tab()
-
             app.finalize_ui_setup(globals(), tab_components)
-
         if stats_app is not None:
             stats_app.setup_events(main, state)
         main_tabs.select(fn=select_tab, inputs= [tab_state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
-
         return main
 
 if __name__ == "__main__":
