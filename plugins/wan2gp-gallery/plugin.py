@@ -49,6 +49,8 @@ class GalleryPlugin(WAN2GPPlugin):
         self.request_component("image_end_row")
         self.request_component("image_prompt_type_radio")
         self.request_component("image_prompt_type_endcheckbox")
+        self.request_component("plugin_data")
+        self.register_data_hook("before_metadata_save", self.add_merge_info_to_metadata)
         
     def create_gallery_ui(self):
         css = """
@@ -176,10 +178,20 @@ class GalleryPlugin(WAN2GPPlugin):
                     with gr.Column(elem_id="metadata-panel-container"):
                         self.send_to_generator_settings_btn = gr.Button("Use Settings in Generator", interactive=False, visible=False)
                         self.join_videos_btn = gr.Button("Join 2 Selected Videos", interactive=False, visible=False)
+                        self.recreate_join_btn = gr.Button("Recreate Join From This Video", visible=False, interactive=False)
                         with gr.Row(visible=False) as self.frame_preview_row:
                             self.first_frame_preview = gr.Image(label="First Frame", interactive=False, height=150)
                             self.last_frame_preview = gr.Image(label="Last Frame", interactive=False, height=150)
                         self.metadata_panel_output = gr.HTML(value="<div class='metadata-content'><p class='placeholder'>Select a file to view its metadata.</p></div>")
+                        with gr.Column(visible=False) as self.merge_info_display:
+                            gr.Markdown("--- \n #### Merged From")
+                            with gr.Row():
+                                with gr.Column():
+                                    self.merge_source1_prompt = gr.Markdown(elem_classes="metadata-content")
+                                    self.merge_source1_image = gr.Image(interactive=False, show_label=False)
+                                with gr.Column():
+                                    self.merge_source2_prompt = gr.Markdown(elem_classes="metadata-content")
+                                    self.merge_source2_image = gr.Image(interactive=False, show_label=False)
                         with gr.Column(visible=False) as self.join_interface:
                             with gr.Row():
                                 with gr.Column():
@@ -231,7 +243,24 @@ class GalleryPlugin(WAN2GPPlugin):
         
         full_html = f"<div class='gallery-grid'>{items_html}</div>"
         clear_metadata_html = "<div class='metadata-content'><p class='placeholder'>Select a file to view its metadata.</p></div>"
-        return full_html, "", clear_metadata_html, gr.Button(visible=False), gr.Button(visible=False), gr.Row(visible=False), gr.Image(value=None), gr.Image(value=None), gr.Column(visible=False)
+        return {
+            self.gallery_html_output: full_html,
+            self.selected_files_for_backend: "",
+            self.metadata_panel_output: clear_metadata_html,
+            self.join_videos_btn: gr.Button(visible=False),
+            self.recreate_join_btn: gr.Button(visible=False),
+            self.send_to_generator_settings_btn: gr.Button(visible=False),
+            self.frame_preview_row: gr.Row(visible=False),
+            self.first_frame_preview: gr.Image(value=None),
+            self.last_frame_preview: gr.Image(value=None),
+            self.join_interface: gr.Column(visible=False),
+            self.merge_info_display: gr.Column(visible=False)
+        }
+
+    def add_merge_info_to_metadata(self, configs, plugin_data, **kwargs):
+        if plugin_data and "merge_info" in plugin_data:
+            configs["merge_info"] = plugin_data["merge_info"]
+        return configs
 
     def get_video_info_html(self, current_state, file_path):
         configs, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
@@ -262,25 +291,69 @@ class GalleryPlugin(WAN2GPPlugin):
     def update_metadata_panel_and_buttons(self, selection_str, current_state):
         file_paths = selection_str.split(',') if selection_str else []
         video_files = [f for f in file_paths if self.has_video_file_extension(f)]
-        join_btn = gr.update(visible=len(video_files) == 2 and len(file_paths) == 2, interactive=True)
-        use_settings_btn, path_for_settings, frame_preview, first_frame, last_frame = gr.update(visible=False), "", gr.update(visible=False), gr.update(value=None), gr.update(value=None)
-        metadata_html = "<div class='metadata-content'><p class='placeholder'>Select a file.</p></div>"
+        
+        updates = {
+            self.join_videos_btn: gr.Button(visible=len(video_files) == 2 and len(file_paths) == 2, interactive=True),
+            self.recreate_join_btn: gr.Button(visible=False),
+            self.send_to_generator_settings_btn: gr.Button(visible=False),
+            self.path_for_settings_loader: "",
+            self.frame_preview_row: gr.Row(visible=False),
+            self.first_frame_preview: gr.Image(value=None),
+            self.last_frame_preview: gr.Image(value=None, visible=True),
+            self.join_interface: gr.Column(visible=False),
+            self.merge_info_display: gr.Column(visible=False),
+            self.metadata_panel_output: gr.HTML(value="<div class='metadata-content'><p class='placeholder'>Select a file to view its metadata.</p></div>", visible=True),
+            self.merge_source1_prompt: gr.Markdown(value=""),
+            self.merge_source1_image: gr.Image(value=None),
+            self.merge_source2_prompt: gr.Markdown(value=""),
+            self.merge_source2_image: gr.Image(value=None)
+        }
+
         if len(file_paths) == 1:
-            path_for_settings = file_paths[0]
-            configs, _ = self.get_settings_from_file(current_state, path_for_settings, False, False, False)
-            use_settings_btn = gr.update(visible=True, interactive=bool(configs))
-            frame_preview = gr.update(visible=True)
-            if self.has_video_file_extension(path_for_settings):
-                first_frame_pil = self.get_video_frame(path_for_settings, 0, return_PIL=True)
-                _, _, _, frame_count = self.get_video_info(path_for_settings)
-                last_frame_pil = self.get_video_frame(path_for_settings, frame_count - 1, return_PIL=True) if frame_count > 1 else first_frame_pil
-                first_frame, last_frame = gr.update(value=first_frame_pil), gr.update(value=last_frame_pil, visible=True)
-            elif self.has_image_file_extension(path_for_settings):
-                first_frame, last_frame = gr.update(value=Image.open(path_for_settings), label="Image Preview"), gr.update(visible=False)
-            metadata_html = self.get_video_info_html(current_state, path_for_settings)
+            file_path = file_paths[0]
+            updates[self.path_for_settings_loader] = file_path
+            configs, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
+            updates[self.send_to_generator_settings_btn] = gr.Button(visible=True, interactive=bool(configs))
+            updates[self.metadata_panel_output] = gr.HTML(value=self.get_video_info_html(current_state, file_path), visible=True)
+
+            if configs and "merge_info" in configs:
+                merge_info = configs["merge_info"]
+                save_path = self.server_config.get("save_path", "outputs")
+                image_save_path = self.server_config.get("image_save_path", "outputs")
+                vid1_rel, vid2_rel = merge_info['source_video_1']['path'], merge_info['source_video_2']['path']
+                vid1_abs = next((p for p in [os.path.join(save_path, vid1_rel), os.path.join(image_save_path, vid1_rel)] if os.path.exists(p)), None)
+                vid2_abs = next((p for p in [os.path.join(save_path, vid2_rel), os.path.join(image_save_path, vid2_rel)] if os.path.exists(p)), None)
+
+                if vid1_abs and vid2_abs:
+                    updates[self.recreate_join_btn] = gr.Button(visible=True, interactive=True)
+                    updates[self.merge_info_display] = gr.Column(visible=True)
+                    f1_num, f2_num = merge_info['source_video_1']['frame_used'], merge_info['source_video_2']['frame_used']
+                    f1_pil, f2_pil = self.get_video_frame(vid1_abs, f1_num - 1, return_PIL=True), self.get_video_frame(vid2_abs, f2_num - 1, return_PIL=True)
+                    c1, _ = self.get_settings_from_file(current_state, vid1_abs, False, False, False)
+                    c2, _ = self.get_settings_from_file(current_state, vid2_abs, False, False, False)
+                    p1, p2 = (c1.get('prompt', 'N/A') if c1 else 'N/A'), (c2.get('prompt', 'N/A') if c2 else 'N/A')
+                    
+                    updates[self.merge_source1_prompt] = f"<b>{vid1_rel} (Frame {f1_num})</b><br>{p1[:100] + '...' if len(p1) > 100 else p1}"
+                    updates[self.merge_source1_image] = f1_pil
+                    updates[self.merge_source2_prompt] = f"<b>{vid2_rel} (Frame {f2_num})</b><br>{p2[:100] + '...' if len(p2) > 100 else p2}"
+                    updates[self.merge_source2_image] = f2_pil
+                else:
+                    updates[self.frame_preview_row] = gr.Row(visible=True) # Fallback to default preview
+            
+            else: # Not a merge file, show normal preview
+                updates[self.frame_preview_row] = gr.Row(visible=True)
+                if self.has_video_file_extension(file_path):
+                    first_frame_pil = self.get_video_frame(file_path, 0, return_PIL=True)
+                    _, _, _, frame_count = self.get_video_info(file_path)
+                    last_frame_pil = self.get_video_frame(file_path, frame_count - 1, return_PIL=True) if frame_count > 1 else first_frame_pil
+                    updates[self.first_frame_preview], updates[self.last_frame_preview] = gr.Image(value=first_frame_pil, label="First Frame"), gr.Image(value=last_frame_pil, visible=True)
+                elif self.has_image_file_extension(file_path):
+                    updates[self.first_frame_preview], updates[self.last_frame_preview] = gr.Image(value=Image.open(file_path), label="Image Preview"), gr.Image(visible=False)
+
         elif len(file_paths) > 1:
-            metadata_html = f"<div class='metadata-content'><p>{len(file_paths)} items selected.</p></div>"
-        return join_btn, use_settings_btn, metadata_html, path_for_settings, frame_preview, first_frame, last_frame, gr.update(visible=False)
+            updates[self.metadata_panel_output] = gr.HTML(value=f"<div class='metadata-content'><p>{len(file_paths)} items selected.</p></div>", visible=True)
+        
+        return updates
 
     def load_settings_and_frames_from_gallery(self, current_state, file_path):
         if not file_path: gr.Warning("No file selected."); return gr.update(), gr.update(), gr.update(), gr.update()
@@ -313,7 +386,32 @@ class GalleryPlugin(WAN2GPPlugin):
     def show_join_interface(self, selection_str, current_state):
         video_files = [f for f in selection_str.split(',') if self.has_video_file_extension(f)] if selection_str else []
         if len(video_files) != 2: gr.Warning("Please select exactly two videos."); return {}
-        vid1_path, vid2_path = video_files[0], video_files[1]
+        return self.recreate_join_interface(video_files, current_state)
+    
+    def recreate_join_interface(self, file_info, current_state):
+        if isinstance(file_info, str): # Called from single merged video
+            configs, _ = self.get_settings_from_file(current_state, file_info, False, False, False)
+            if not (configs and "merge_info" in configs):
+                gr.Warning("Could not find merge info in the selected file.")
+                return {}
+            merge_info = configs["merge_info"]
+            save_path = self.server_config.get("save_path", "outputs")
+            image_save_path = self.server_config.get("image_save_path", "outputs")
+            vid1_rel, vid2_rel = merge_info['source_video_1']['path'], merge_info['source_video_2']['path']
+            vid1_abs = next((p for p in [os.path.join(save_path, vid1_rel), os.path.join(image_save_path, vid1_rel)] if os.path.exists(p)), None)
+            vid2_abs = next((p for p in [os.path.join(save_path, vid2_rel), os.path.join(image_save_path, vid2_rel)] if os.path.exists(p)), None)
+            if not (vid1_abs and vid2_abs):
+                gr.Warning("One or both source videos for merging could not be found.")
+                return {}
+            vid1_path, vid2_path = vid1_abs, vid2_abs
+            frame1_num, frame2_num = merge_info['source_video_1']['frame_used'], merge_info['source_video_2']['frame_used']
+        elif isinstance(file_info, list) and len(file_info) == 2: # Called from 2 selected videos
+            vid1_path, vid2_path = file_info[0], file_info[1]
+            _, _, _, v1_frames = self.get_video_info(vid1_path)
+            frame1_num, frame2_num = v1_frames, 1
+        else:
+            return {}
+        
         server_port_val = int(self.args.server_port) if self.args.server_port != 0 else 7860
         server_name_val = self.args.server_name if self.args.server_name and self.args.server_name != "0.0.0.0" else "127.0.0.1"
         base_url = f"http://{server_name_val}:{server_port_val}"
@@ -329,12 +427,17 @@ class GalleryPlugin(WAN2GPPlugin):
         return { 
             self.join_interface: gr.Column(visible=True), 
             self.frame_preview_row: gr.Row(visible=False), 
+            self.merge_info_display: gr.Column(visible=False),
+            self.metadata_panel_output: gr.HTML(visible=False),
+            self.send_to_generator_settings_btn: gr.Button(visible=False),
+            self.join_videos_btn: gr.Button(visible=False),
+            self.recreate_join_btn: gr.Button(visible=False),
             self.video1_preview: gr.HTML(value=player1_html), 
             self.video2_preview: gr.HTML(value=player2_html), 
             self.video1_path: vid1_path, 
             self.video2_path: vid2_path, 
-            self.video1_frame_slider: gr.Slider(maximum=v1_frames, value=v1_frames), 
-            self.video2_frame_slider: gr.Slider(maximum=v2_frames, value=1), 
+            self.video1_frame_slider: gr.Slider(maximum=v1_frames, value=frame1_num), 
+            self.video2_frame_slider: gr.Slider(maximum=v2_frames, value=frame2_num), 
             self.video1_info: self.get_video_info_html(current_state, vid1_path), 
             self.video2_info: self.get_video_info_html(current_state, vid2_path) 
         }
@@ -344,15 +447,77 @@ class GalleryPlugin(WAN2GPPlugin):
         frame2 = self.get_video_frame(vid2_path, int(frame2_num) - 1, return_PIL=True)
         gr.Info("Frames sent to Video Generator.")
         updated_image_prompt_type = self.add_to_sequence(current_image_prompt_type, "SE")
-        return { self.image_start: [(frame1, "Start Frame")], self.image_end: [(frame2, "End Frame")], self.main_tabs: gr.Tabs(selected="video_gen"), self.join_interface: gr.Column(visible=False), self.image_prompt_type: updated_image_prompt_type, self.image_start_row: gr.Row(visible=True), self.image_end_row: gr.Row(visible=True), self.image_prompt_type_radio: gr.Radio(value="S"), self.image_prompt_type_endcheckbox: gr.Checkbox(value=True) }
+        merge_info = {
+            "source_video_1": {
+                "path": os.path.basename(vid1_path),
+                "frame_used": int(frame1_num)
+            },
+            "source_video_2": {
+                "path": os.path.basename(vid2_path),
+                "frame_used": int(frame2_num)
+            }
+        }
+        return {
+            self.image_start: [(frame1, "Start Frame")],
+            self.image_end: [(frame2, "End Frame")],
+            self.main_tabs: gr.Tabs(selected="video_gen"),
+            self.join_interface: gr.Column(visible=False),
+            self.image_prompt_type: updated_image_prompt_type,
+            self.image_start_row: gr.Row(visible=True),
+            self.image_end_row: gr.Row(visible=True),
+            self.image_prompt_type_radio: gr.Radio(value="S"),
+            self.image_prompt_type_endcheckbox: gr.Checkbox(value=True),
+            self.plugin_data: {"merge_info": merge_info}
+        }
 
     def post_ui_setup(self, components: dict):
-        self.main.load(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, self.first_frame_preview, self.last_frame_preview, self.join_interface])
-        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, self.first_frame_preview, self.last_frame_preview, self.join_interface])
-        self.selected_files_for_backend.change(fn=self.update_metadata_panel_and_buttons, inputs=[self.selected_files_for_backend, self.state], outputs=[self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output, self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview, self.last_frame_preview, self.join_interface], show_progress="hidden")
-        self.join_videos_btn.click(fn=self.show_join_interface, inputs=[self.selected_files_for_backend, self.state], outputs=[self.join_interface, self.frame_preview_row, self.video1_preview, self.video2_preview, self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider, self.video1_info, self.video2_info])
+        self.main.load(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[
+            self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
+            self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
+            self.first_frame_preview, self.last_frame_preview, self.join_interface, 
+            self.recreate_join_btn, self.merge_info_display
+        ])
+        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[
+            self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
+            self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
+            self.first_frame_preview, self.last_frame_preview, self.join_interface,
+            self.recreate_join_btn, self.merge_info_display
+        ])
+        self.selected_files_for_backend.change(fn=self.update_metadata_panel_and_buttons, 
+            inputs=[self.selected_files_for_backend, self.state], 
+            outputs=[
+                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output, 
+                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview, 
+                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
+                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
+            ], show_progress="hidden"
+        )
+        self.join_videos_btn.click(fn=self.show_join_interface, inputs=[self.selected_files_for_backend, self.state], outputs=[
+            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
+            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
+            self.video1_preview, self.video2_preview,
+            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
+            self.video1_info, self.video2_info
+        ])
+        self.recreate_join_btn.click(
+            fn=self.recreate_join_interface, inputs=[self.path_for_settings_loader, self.state], outputs=[
+            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
+            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
+            self.video1_preview, self.video2_preview,
+            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
+            self.video1_info, self.video2_info
+        ])
         self.send_to_generator_settings_btn.click(fn=self.load_settings_and_frames_from_gallery, inputs=[self.state, self.path_for_settings_loader], outputs=[self.model_family, self.model_choice, self.main_tabs, self.refresh_form_trigger], show_progress="hidden")
-        self.send_to_generator_btn.click(fn=self.send_selected_frames_to_generator, inputs=[self.video1_path, self.video1_frame_slider, self.video2_path, self.video2_frame_slider, self.image_prompt_type], outputs=[self.image_start, self.image_end, self.main_tabs, self.join_interface, self.image_prompt_type, self.image_start_row, self.image_end_row, self.image_prompt_type_radio, self.image_prompt_type_endcheckbox])
-        self.cancel_join_btn.click(fn=lambda: gr.Column(visible=False), outputs=self.join_interface)
+        self.send_to_generator_btn.click(fn=self.send_selected_frames_to_generator, inputs=[self.video1_path, self.video1_frame_slider, self.video2_path, self.video2_frame_slider, self.image_prompt_type], outputs=[self.image_start, self.image_end, self.main_tabs, self.join_interface, self.image_prompt_type, self.image_start_row, self.image_end_row, self.image_prompt_type_radio, self.image_prompt_type_endcheckbox, self.plugin_data])
+        self.cancel_join_btn.click(
+            fn=self.update_metadata_panel_and_buttons,
+            inputs=[self.selected_files_for_backend, self.state],
+            outputs=[
+                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output,
+                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview,
+                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
+                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
+            ]
+        )
         
         return {}

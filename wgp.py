@@ -724,10 +724,12 @@ def add_video_task(**inputs):
     current_task_id = task_id
 
     start_image_data, end_image_data, start_image_labels, end_image_labels = get_preview_images(inputs)
-
+    plugin_data = inputs.pop('plugin_data', {})
+    
     queue.append({
         "id": current_task_id,
         "params": inputs.copy(),
+        "plugin_data": plugin_data,
         "repeats": inputs["repeat_generation"],
         "length": inputs["video_length"], # !!!
         "steps": inputs["num_inference_steps"],
@@ -4595,6 +4597,7 @@ def generate_video(
     model_type,
     model_filename,
     mode,
+    plugin_data=None,
 ):
 
 
@@ -5664,7 +5667,8 @@ def process_tasks(state):
         send_cmd = com_stream.output_queue.push
         def generate_video_error_handler():
             try:
-                generate_video(task, send_cmd,  **params)
+                plugin_data = task.pop('plugin_data', {})
+                generate_video(task, send_cmd, plugin_data=plugin_data, **params)
             except Exception as e:
                 tb = traceback.format_exc().split('\n')[:-1] 
                 print('\n'.join(tb))
@@ -6379,6 +6383,13 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
 
     if target == "metadata":
         inputs = {k: v for k,v in inputs.items() if v != None  }
+        if hasattr(app, 'plugin_manager'):
+            inputs = app.plugin_manager.run_data_hooks(
+                'before_metadata_save',
+                configs=inputs,
+                plugin_data=inputs.pop('plugin_data', {}),
+                model_type=model_type
+            )
 
     return inputs
 
@@ -6850,6 +6861,7 @@ def save_inputs(
             override_profile,
             mode,
             state,
+            plugin_data,
 ):
 
 
@@ -7498,6 +7510,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         gen = dict()
         gen["queue"] = []
         state_dict["gen"] = gen
+        plugin_data = gr.State({})
     model_def = get_model_def(model_type)
     if model_def == None: model_def = {} 
     base_model_type = get_base_model_type(model_type)
@@ -8587,9 +8600,9 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             onemoresample_btn.click(fn=one_more_sample,inputs=[state], outputs= [state])
             onemorewindow_btn.click(fn=one_more_window,inputs=[state], outputs= [state])
 
-            inputs_names= list(inspect.signature(save_inputs).parameters)[1:-1]
+            inputs_names= list(inspect.signature(save_inputs).parameters)[1:-2]
             locals_dict = locals()
-            gen_inputs = [locals_dict[k] for k in inputs_names] + [state]
+            gen_inputs = [locals_dict[k] for k in inputs_names] + [state, plugin_data]
             save_settings_btn.click( fn=validate_wizard_prompt, inputs =[state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] , outputs= [prompt]).then(
                 save_inputs, inputs =[target_settings] + gen_inputs, outputs = [])
 

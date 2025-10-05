@@ -30,6 +30,7 @@ class WAN2GPPlugin:
         self._global_requests: List[str] = []
         self._insert_after_requests: List[InsertAfterRequest] = []
         self._setup_complete = False
+        self._data_hooks: Dict[str, List[callable]] = {}
         
     def setup_ui(self) -> None:
         pass
@@ -52,6 +53,11 @@ class WAN2GPPlugin:
     @property
     def global_requests(self) -> List[str]:
         return self._global_requests.copy()
+        
+    def register_data_hook(self, hook_name: str, callback: callable):
+        if hook_name not in self._data_hooks:
+            self._data_hooks[hook_name] = []
+        self._data_hooks[hook_name].append(callback)
 
     def insert_after(self, target_component_id: str, new_component_constructor: callable) -> None:
         if not hasattr(self, '_insert_after_requests'):
@@ -71,6 +77,7 @@ class PluginManager:
         self.plugins: Dict[str, WAN2GPPlugin] = {}
         self.plugins_dir = plugins_dir
         os.makedirs(self.plugins_dir, exist_ok=True)
+        self.data_hooks: Dict[str, List[callable]] = {}
         
     def install_plugin_from_url(self, git_url: str):
         if not git_url or not git_url.startswith("https://github.com/"):
@@ -137,6 +144,10 @@ class PluginManager:
                         plugin = obj()
                         plugin.setup_ui()
                         self.plugins[plugin_dir_name] = plugin
+                        for hook_name, callbacks in plugin._data_hooks.items():
+                            if hook_name not in self.data_hooks:
+                                self.data_hooks[hook_name] = []
+                            self.data_hooks[hook_name].extend(callbacks)
                         print(f"Loaded plugin: {plugin.name} (from {plugin_dir_name})")
                         break
             except Exception as e:
@@ -168,6 +179,24 @@ class PluginManager:
             except Exception as e:
                 print(f"Error in setup_ui for plugin {plugin_id}: {str(e)}")
         return {'tabs': tabs}
+        
+    def run_data_hooks(self, hook_name: str, *args, **kwargs):
+        if hook_name not in self.data_hooks:
+            return kwargs.get('configs')
+
+        callbacks = self.data_hooks[hook_name]
+        data = kwargs.get('configs')
+
+        if 'configs' in kwargs:
+            kwargs.pop('configs')
+
+        for callback in callbacks:
+            try:
+                data = callback(data, **kwargs)
+            except Exception as e:
+                print(f"[PluginManager] Error running hook '{hook_name}' from {callback.__module__}: {e}")
+                traceback.print_exc()
+        return data
 
     def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
         all_insert_requests: List[InsertAfterRequest] = []
@@ -236,9 +265,9 @@ class WAN2GPApplication:
 
     def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components: Dict[str, Any]):
         self._create_plugin_tabs(main_module_globals)
-        self.ui_components = { 
+        self.ui_components = {
             name: obj for name, obj in all_ui_components.items() 
-            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion)) 
+            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
         }
         if self.plugin_manager:
             self.plugin_manager.run_post_ui_setup(self.ui_components)
