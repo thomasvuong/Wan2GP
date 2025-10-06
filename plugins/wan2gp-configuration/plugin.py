@@ -7,6 +7,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Configuration Tab"
         self.version = "1.0.0"
+        self.description = "Lets you adjust all your performance and UI options for WAN2GP"
 
     def setup_ui(self):
         self.request_global("args")

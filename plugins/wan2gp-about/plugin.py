@@ -6,6 +6,7 @@ class AboutPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "About Tab"
         self.version = "1.0.0"
+        self.description = "Credits for the creator and all co-creators of WAN2GP"
 
     def setup_ui(self):
         self.add_tab(

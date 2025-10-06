@@ -12,6 +12,7 @@ class GalleryPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "File Gallery"
         self.version = "1.0.0"
+        self.description = "Adds a Gallery tab that allows you to view metadata of all files in your output folders, join video frames with a single click, and more"
 
     def setup_ui(self):
         self.add_tab(

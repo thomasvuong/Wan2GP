@@ -10,6 +10,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Plugin Manager UI"
         self.version = "1.4.3"
+        self.description = "A built-in UI for managing, installing, and updating Wan2GP plugins"
 
     def setup_ui(self):
         self.request_global("app")
@@ -69,13 +70,17 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         for plugin in plugins_info:
             plugin_id = plugin['id']
             checked = "checked" if plugin_id in enabled_plugins else ""
+            description_text = plugin.get('description', 'No description provided.')
             items_html += f"""
             <div class="plugin-item" data-plugin-id="{plugin_id}">
                 <div class="plugin-info-container">
                     <input type="checkbox" class="plugin-enable-checkbox" {checked}>
                     <div class="plugin-item-info">
-                        <span class="name">{plugin['name']}</span>
-                        <span class="version">version {plugin['version']} (id: {plugin_id})</span>
+                        <div class="plugin-header">
+                            <span class="name">{plugin['name']}</span>
+                            <span class="version">version {plugin['version']} (id: {plugin_id})</span>
+                        </div>
+                        <span class="description">{description_text}</span>
                     </div>
                 </div>
                 <div class="plugin-item-actions">
@@ -89,12 +94,13 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         css = """
         <style>
             .plugin-list { display: flex; flex-direction: column; gap: 12px; }
-            .plugin-item { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 16px; border: 1px solid var(--border-color-primary); border-radius: 12px; background-color: var(--background-fill-secondary); transition: box-shadow 0.2s ease-in-out; }
+            .plugin-item { display: flex; flex-wrap: column; gap: 12px; justify-content: space-between; align-items: center; padding: 16px; border: 1px solid var(--border-color-primary); border-radius: 12px; background-color: var(--background-fill-secondary); transition: box-shadow 0.2s ease-in-out; }
             .plugin-item:hover { box-shadow: var(--shadow-drop-lg); }
             .plugin-info-container { display: flex; align-items: center; gap: 16px; flex-grow: 1; }
-            .plugin-item-info { display: flex; flex-direction: column; gap: 2px; }
+            .plugin-item-info { display: flex; flex-direction: column; gap: 4px; }
             .plugin-item-info .name { font-weight: 600; font-size: 1.1em; color: var(--text-color-primary); font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif; }
             .plugin-item-info .version { font-size: 0.9em; color: var(--text-color-secondary); }
+            .plugin-item-info .description { font-size: 0.95em; color: var(--text-color-secondary); margin-top: 4px; }
             .plugin-item-actions { display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
             .plugin-action-btn { display: inline-flex; align-items: center; justify-content: center; margin: 0 !important; border: 1px solid var(--button-secondary-border-color, #ccc) !important; background: var(--button-secondary-background-fill, #f0f0f0) !important; color: var(--button-secondary-text-color) !important; padding: 4px 12px !important; border-radius: 4px !important; cursor: pointer; font-weight: 500; }
             .plugin-action-btn:hover { background: var(--button-secondary-background-fill-hover, #e0e0e0) !important; transform: translateY(-1px); box-shadow: var(--shadow-drop); }

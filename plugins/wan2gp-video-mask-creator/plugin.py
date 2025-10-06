@@ -9,6 +9,7 @@ class VideoMaskCreatorPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Video Mask Creator"
         self.version = "1.0.0"
+        self.description = "Create masks for your videos with Matanyone"
 
     def setup_ui(self):
         self.request_global("vmc_event_handler")

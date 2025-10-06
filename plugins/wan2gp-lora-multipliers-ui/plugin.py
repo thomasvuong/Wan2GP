@@ -6,6 +6,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Lora Multipliers UI"
         self.version = "1.0.0"
+        self.description = "Dynamically set lora multipliers with slider bars instead of text"
         self.request_component("loras_multipliers")
         self.request_component("loras_choices")
         self.request_component("guidance_phases")

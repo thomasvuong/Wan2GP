@@ -28,6 +28,7 @@ class WAN2GPPlugin:
         self.tabs: Dict[str, PluginTab] = {}
         self.name = self.__class__.__name__
         self.version = "1.0.0"
+        self.description = "No description provided."
         self._component_requests: List[str] = []
         self._global_requests: List[str] = []
         self._insert_after_requests: List[InsertAfterRequest] = []
@@ -87,7 +88,7 @@ class PluginManager:
         plugins_info = []
         for dir_name in self.discover_plugins():
             plugin_path = os.path.join(self.plugins_dir, dir_name)
-            info = {'id': dir_name, 'name': dir_name, 'version': 'N/A', 'path': plugin_path}
+            info = {'id': dir_name, 'name': dir_name, 'version': 'N/A', 'description': 'No description provided.', 'path': plugin_path}
             try:
                 # Use import_module, which correctly handles packages and relative imports
                 module = importlib.import_module(f"{dir_name}.plugin")
@@ -96,6 +97,7 @@ class PluginManager:
                         instance = obj()
                         info['name'] = instance.name
                         info['version'] = instance.version
+                        info['description'] = instance.description
                         break
             except Exception as e:
                 print(f"Could not load metadata for plugin {dir_name}: {e}")

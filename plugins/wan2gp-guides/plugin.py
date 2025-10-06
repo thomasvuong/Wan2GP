@@ -6,6 +6,7 @@ class GuidesPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Guides Tab"
         self.version = "1.0.0"
+        self.description = "Guides for using WAN2GP"
 
     def setup_ui(self):
         self.add_tab(
@@ -27,6 +28,9 @@ class GuidesPlugin(WAN2GPPlugin):
         with open("docs/FINETUNES.md", "r", encoding="utf-8") as reader:
             finetunes = reader.read()
 
+        with open("docs/PLUGINS.md", "r", encoding="utf-8") as reader:
+            plugins = reader.read()
+
         with gr.Tabs() :
             with gr.Tab("Models", id="models"):
                 gr.Markdown(models)
@@ -36,3 +40,5 @@ class GuidesPlugin(WAN2GPPlugin):
                 gr.Markdown(vace)
             with gr.Tab("Finetunes", id="finetunes"):
                 gr.Markdown(finetunes)
+            with gr.Tab("Plugins", id="plugins"):
+                gr.Markdown(plugins)

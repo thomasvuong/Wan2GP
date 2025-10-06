@@ -9,6 +9,7 @@ class DownloadsPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Downloads Tab"
         self.version = "1.0.0"
+        self.description = "Download our in-house loras!"
 
     def setup_ui(self):
         self.request_global("get_lora_dir")
