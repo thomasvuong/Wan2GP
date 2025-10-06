@@ -25,13 +25,6 @@ class VideoMaskCreatorPlugin(WAN2GPPlugin):
         self.request_component("refresh_form_trigger")
         self.request_component("save_form_trigger")
 
-        self.add_tab(
-            tab_id="video_mask_creator",
-            label="Video Mask Creator",
-            component_constructor=self.create_mask_creator_ui,
-            position=3
-        )
-
     def create_mask_creator_ui(self):
         pass
 
