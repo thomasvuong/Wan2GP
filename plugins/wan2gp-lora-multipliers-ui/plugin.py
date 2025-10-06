@@ -70,7 +70,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             </style>
             """
 
-            def _build_multipliers_string(num_selected_loras, guidance_phases_val, split_counts, all_slider_values_flat):
+            def _build_multipliers_string(num_selected_loras, guidance_phases_val, split_counts, all_slider_values_flat, separator_index=-1):
                 textbox_strings = []
                 slider_cursor = 0
                 for i in range(MAX_LORA_SLIDERS):
@@ -95,8 +95,22 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                             textbox_strings.append(",".join(lora_step_strings))
                     else:
                         slider_cursor += MAX_STEP_SPLITS * 3
-                        
-                return " ".join(textbox_strings)
+                
+                if not textbox_strings:
+                    return ""
+
+                if separator_index != -1 and num_selected_loras < separator_index:
+                    separator_index = -1
+
+                if separator_index > 0 and separator_index <= len(textbox_strings):
+                    part1 = " ".join(textbox_strings[:separator_index])
+                    part2 = " ".join(textbox_strings[separator_index:])
+                    if part2:
+                        return f"{part1}|{part2}"
+                    else:
+                        return f"{part1}|"
+                else:
+                    return " ".join(textbox_strings)
 
             def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts, triggered_lora_index=-1):
                 if triggered_lora_index != -1:
@@ -105,9 +119,17 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 elif triggered_lora_index == -1:
                     current_split_counts = [1] * MAX_LORA_SLIDERS
                 
+                separator_index = -1
+                multipliers_per_lora = []
+                if current_multipliers_str:
+                    if '|' in current_multipliers_str:
+                        parts = current_multipliers_str.split('|')
+                        loras_before_sep = [s for s in parts[0].split(' ') if s]
+                        separator_index = len(loras_before_sep)
+                    multipliers_per_lora = [s for s in current_multipliers_str.replace('|', ' ').split(' ') if s]
+
                 ui_updates = []
                 all_slider_values_flat = []
-                multipliers_per_lora = current_multipliers_str.split(' ')
 
                 for i in range(MAX_LORA_SLIDERS):
                     is_lora_visible = i < len(selected_lora_indices)
@@ -152,18 +174,26 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         ui_updates.append(gr.update(value=""))
                         for _ in range(MAX_STEP_SPLITS):
                             ui_updates.extend([gr.update(visible=False), gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
-                            all_slider_values_flat.extend([1.0] * 3 * MAX_STEP_SPLITS)
+                        all_slider_values_flat.extend([1.0] * 3)
 
-                new_textbox_value = _build_multipliers_string(len(selected_lora_indices), guidance_phases_val, current_split_counts, all_slider_values_flat)
+                effective_separator_index = separator_index
+                if effective_separator_index != -1 and len(selected_lora_indices) < effective_separator_index:
+                    effective_separator_index = -1
+
+                new_textbox_value = _build_multipliers_string(len(selected_lora_indices), guidance_phases_val, current_split_counts, all_slider_values_flat, effective_separator_index)
                 
-                return [current_split_counts, gr.update(value=new_textbox_value)] + ui_updates
+                return [effective_separator_index, current_split_counts, gr.update(value=new_textbox_value)] + ui_updates
 
-            def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, *all_slider_values_flat):
-                new_textbox_value = _build_multipliers_string(len(selected_loras), guidance_phases_val, split_counts, all_slider_values_flat)
+            def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, separator_index, *all_slider_values_flat):
+                effective_separator_index = separator_index
+                if effective_separator_index != -1 and len(selected_loras) < effective_separator_index:
+                    effective_separator_index = -1
+                new_textbox_value = _build_multipliers_string(len(selected_loras), guidance_phases_val, split_counts, all_slider_values_flat, effective_separator_index)
                 return gr.update(value=new_textbox_value)
 
             with gr.Accordion("Dynamic Lora Multipliers Adjustments", open=True) as main_accordion:
                 gr.HTML(value=css)
+                lora_separator_index = gr.State(-1)
                 lora_split_counts = gr.State([1] * MAX_LORA_SLIDERS)
                 lora_slider_ui_groups = []
 
@@ -201,7 +231,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 event(
                     fn=update_slider_ui_and_textbox,
                     inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
-                    outputs=[lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
                     show_progress="hidden"
                 )
 
@@ -209,13 +239,13 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 group["split_button"].click(
                     fn=update_slider_ui_and_textbox,
                     inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(i)],
-                    outputs=[lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
                     show_progress="hidden"
                 )
 
             update_mults_btn.click(
                 fn=update_textbox_from_sliders,
-                inputs=[loras_choices, guidance_phases, lora_split_counts] + all_sliders_flat,
+                inputs=[loras_choices, guidance_phases, lora_split_counts, lora_separator_index] + all_sliders_flat,
                 outputs=[loras_multipliers],
                 show_progress="hidden"
             )
@@ -226,7 +256,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             main_ui_block.load(
                 fn=update_slider_ui_and_textbox,
                 inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
-                outputs=[lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
                 show_progress="hidden"
             )
 
