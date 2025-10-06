@@ -33,7 +33,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                     border: 1px solid var(--border-color-primary);
                     border-radius: 8px;
                     padding: 12px;
-                    margin-bottom: 12px !important;
+                    margin-bottom: 0px !important;
                     background-color: var(--background-fill-secondary);
                 }
                 .lora-main-container > .gr-row {
@@ -66,6 +66,15 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 }
                 .lora-step-split-container .form {
                     flex-grow: 1;
+                }
+                .lora-section-header h3 {
+                    border-bottom: 1px solid var(--border-color-primary);
+                    padding-bottom: 4px;
+                    margin-top: 16px;
+                    margin-bottom: 0px;
+                }
+                #lora_builder_main_group > div:first-child > h3 {
+                    margin-top: 0;
                 }
             </style>
             """
@@ -130,8 +139,16 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
 
                 ui_updates = []
                 all_slider_values_flat = []
+                num_selected_loras = len(selected_lora_indices)
+                has_separator = separator_index != -1
+                show_accelerator_header = has_separator and separator_index > 0                
+                ui_updates.append(gr.update(visible=show_accelerator_header and num_selected_loras > 0))
 
                 for i in range(MAX_LORA_SLIDERS):
+                    is_first_user_lora = (i == 0 and not show_accelerator_header) or (i == separator_index)
+                    show_user_header_here = is_first_user_lora and num_selected_loras > i
+                    ui_updates.append(gr.update(visible=show_user_header_here))
+
                     is_lora_visible = i < len(selected_lora_indices)
                     ui_updates.append(gr.update(visible=is_lora_visible))
                     
@@ -200,7 +217,9 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 update_mults_btn = gr.Button(visible=False, elem_id="lora_mults_update_btn")
 
                 with gr.Group(elem_id="lora_builder_main_group"):
+                    accelerator_loras_header = gr.Markdown("<h3>Accelerator LoRAs</h3>", visible=False, elem_classes="lora-section-header")
                     for i in range(MAX_LORA_SLIDERS):
+                        user_loras_header = gr.Markdown("<h3>User LoRAs</h3>", visible=False, elem_classes="lora-section-header")
                         with gr.Column(visible=False, elem_classes="lora-main-container") as lora_main_group:
                             with gr.Row(variant="compact"):
                                 lora_name_md = gr.Markdown()
@@ -216,11 +235,19 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                         phase3_slider = gr.Slider(minimum=0.0, maximum=1.0, value=1.0, step=0.05, label="Phase 3", interactive=True, visible=False)
                                     split_groups.append({ "group": lora_step_group, "title": step_range_md, "sliders": [phase1_slider, phase2_slider, phase3_slider] })
                             
-                            lora_slider_ui_groups.append({ "main_group": lora_main_group, "name": lora_name_md, "split_button": split_steps_btn, "splits": split_groups })
+                            lora_slider_ui_groups.append({ 
+                                "main_group": lora_main_group, 
+                                "name": lora_name_md, 
+                                "split_button": split_steps_btn, 
+                                "splits": split_groups,
+                                "user_header": user_loras_header
+                            })
 
             slider_ui_outputs = []
             all_sliders_flat = []
+            slider_ui_outputs.append(accelerator_loras_header)
             for group in lora_slider_ui_groups:
+                slider_ui_outputs.append(group["user_header"])
                 slider_ui_outputs.extend([group["main_group"], group["name"]])
                 for split in group["splits"]:
                     slider_ui_outputs.extend([split["group"], split["title"], *split["sliders"]])
