@@ -12,7 +12,8 @@ class AboutPlugin(WAN2GPPlugin):
         self.add_tab(
             tab_id="about_tab",
             label="About",
-            component_constructor=self.create_about_ui
+            component_constructor=self.create_about_ui,
+            position=7
         )
 
     def create_about_ui(self):

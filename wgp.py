@@ -1827,6 +1827,7 @@ if not Path(server_config_filename).is_file():
         "profile" : profile_type.LowRAM_LowVRAM,
         "preload_model_policy": [],
         "UI_theme": "default",
+        "sort_plugins_alphabetically": False,
         "enabled_plugins": ["wan2gp-gallery", "wan2gp-lora-multipliers-ui", "wan2gp-plugin-manager", "wan2gp-about", "wan2gp-downloads", "wan2gp-guides", "wan2gp-configuration", "wan2gp-video-mask-creator"]
     }
 

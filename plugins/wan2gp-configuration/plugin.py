@@ -40,7 +40,8 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.add_tab(
             tab_id="configuration",
             label="Configuration",
-            component_constructor=self.create_config_ui
+            component_constructor=self.create_config_ui,
+            position=2
         )
 
     def create_config_ui(self):
@@ -136,6 +137,12 @@ class ConfigTabPlugin(WAN2GPPlugin):
                         label="Enabled Plugins (requires restart)",
                         interactive=not self.args.lock_config
                     )
+                    self.sort_plugins_alphabetically_choice = gr.Dropdown(
+                        choices=[("By Position (Default)", False), ("Alphabetically", True)],
+                        value=self.server_config.get("sort_plugins_alphabetically", False),
+                        label="Plugin Tab Sorting",
+                        interactive=not self.args.lock_config
+                    )
 
                 with gr.Tab("Outputs"):
                     self.video_output_codec_choice = gr.Dropdown(choices=[("x265 CRF 28 (Balanced)", 'libx265_28'), ("x264 Level 8 (Balanced)", 'libx264_8'), ("x265 CRF 8 (High Quality)", 'libx265_8'), ("x264 Level 10 (High Quality)", 'libx264_10'), ("x264 Lossless", 'libx264_lossless')], value=self.server_config.get("video_output_codec", "libx264_8"), label="Video Codec")
@@ -166,7 +173,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
          fit_canvas_choice, preload_in_VRAM_choice, depth_anything_v2_variant_choice,
          notification_sound_enabled_choice, notification_sound_volume_choice, max_frames_multiplier_choice,
          display_stats_choice, video_output_codec_choice, image_output_codec_choice, audio_output_codec_choice,
-         enabled_plugins_choice, last_resolution_choice) = args
+         enabled_plugins_choice, sort_plugins_alphabetically_choice, last_resolution_choice) = args
 
         new_server_config = {
             "attention_mode": attention_choice, "transformer_types": transformer_types_choices,
@@ -186,6 +193,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
             "video_output_codec": video_output_codec_choice, "image_output_codec": image_output_codec_choice,
             "audio_output_codec": audio_output_codec_choice,
             "enabled_plugins": enabled_plugins_choice,
+            "sort_plugins_alphabetically": sort_plugins_alphabetically_choice,
             "last_model_type": state["model_type"], "last_model_per_family": state["last_model_per_family"],
             "last_advanced_choice": state["advanced"], "last_resolution_choice": last_resolution_choice,
             "last_resolution_per_group": state["last_resolution_per_group"],
@@ -218,7 +226,8 @@ class ConfigTabPlugin(WAN2GPPlugin):
             self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice, self.fit_canvas_choice,
             self.preload_in_VRAM_choice, self.depth_anything_v2_variant_choice, self.notification_sound_enabled_choice,
             self.notification_sound_volume_choice, self.max_frames_multiplier_choice, self.display_stats_choice,
-            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, self.enabled_plugins_choice, resolution
+            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, 
+            self.enabled_plugins_choice, self.sort_plugins_alphabetically_choice, resolution
         ]
 
         self.apply_btn.click(

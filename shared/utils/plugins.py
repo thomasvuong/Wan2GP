@@ -361,10 +361,18 @@ class WAN2GPApplication:
         plugin_ui = self.plugin_manager.setup_ui()
         plugin_tabs = plugin_ui.get('tabs', {})
         
-        sorted_plugin_tabs = sorted(
-            plugin_tabs.items(),
-            key=lambda item: item[1].get('position', -1)
-        )
+        sort_alphabetically = server_config.get("sort_plugins_alphabetically", False)
+
+        if sort_alphabetically:
+            sorted_plugin_tabs = sorted(
+                plugin_tabs.items(),
+                key=lambda item: item[1]['label']
+            )
+        else:
+            sorted_plugin_tabs = sorted(
+                plugin_tabs.items(),
+                key=lambda item: (item[1].get('position', -1), item[1]['label'])
+            )
 
         for tab_id, tab_info in sorted_plugin_tabs:
             with gr.Tab(tab_info['label'], id=f"plugin_{tab_id}"):
