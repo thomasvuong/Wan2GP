@@ -214,8 +214,13 @@ This automated script will:
 
 ## 📦 Installation
 
+### Nvidia
 For detailed installation instructions for different GPU generations:
 - **[Installation Guide](docs/INSTALLATION.md)** - Complete setup instructions for RTX 10XX to RTX 50XX
+
+### AMD
+For detailed installation instructions for different GPU generations:
+- **[Installation Guide](docs/AMD-INSTALLATION.md)** - Complete setup instructions for Radeon RX 76XX, 77XX, 78XX & 79XX
 
 ## 🎯 Usage
 
