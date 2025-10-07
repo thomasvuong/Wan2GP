@@ -65,7 +65,7 @@ AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
 
 target_mmgp_version = "3.6.2"
-WanGP_version = "8.994"
+WanGP_version = "8.995"
 settings_version = 2.39
 max_source_video_frames = 3000
 prompt_enhancer_image_caption_model, prompt_enhancer_image_caption_processor, prompt_enhancer_llm_model, prompt_enhancer_llm_tokenizer = None, None, None, None
@@ -3123,10 +3123,12 @@ def apply_changes(  state,
         reset_prompt_enhancer()
     if all(change in ["attention_mode", "vae_config", "boost", "save_path", "metadata_type", "clear_file_list", "fit_canvas", "depth_anything_v2_variant", 
                       "notification_sound_enabled", "notification_sound_volume", "mmaudio_enabled", "max_frames_multiplier", "display_stats",
-                      "video_output_codec", "image_output_codec", "audio_output_codec", "checkpoints_paths", "model_hierarchy_type_choice"] for change in changes ):
+                      "video_output_codec", "image_output_codec", "audio_output_codec", "checkpoints_paths", "model_hierarchy_type"] for change in changes ):
         model_family = gr.Dropdown()
         model_base_type = gr.Dropdown()
         model_choice = gr.Dropdown()
+        if "model_hierarchy_type" in changes:
+            model_family, model_base_type, model_choice = generate_dropdown_model_list(model_type)
     else:
         reload_needed = True
         model_family, model_base_type, model_choice = generate_dropdown_model_list(model_type)
@@ -4384,6 +4386,7 @@ def process_prompt_enhancer(prompt_enhancer, original_prompts,  image_start, ori
     prompt_images = []
     if "I" in prompt_enhancer:
         if image_start != None:
+            if not isinstance(image_start, list): image_start= [image_start] 
             prompt_images += image_start
         if original_image_refs != None:
             prompt_images += original_image_refs[:1]
@@ -8966,6 +8969,7 @@ def generate_configuration_tab(state, blocks, header, model_family, model_base_t
                     ],
                     value= server_config.get("model_hierarchy_type", 1),
                     label= "Models Hierarchy In User Interface",
+                    visible=args.betatest, 
                     scale= 2,
                     )
 
@@ -9476,7 +9480,7 @@ def get_sorted_dropdown(dropdown_types, current_model_family, current_model_type
         return sorted_familes, sorted_choices, finetunes_dict[get_parent_model_type(current_model_type)]
         
     else:
-        dropdown_types_list = list({get_parent_model_type(model[2]) for model in dropdown_choices})
+        dropdown_types_list = list({get_base_model_type(model[2]) for model in dropdown_choices})
         dropdown_choices = [model[1:] for model in dropdown_choices] 
         return sorted_familes, dropdown_types_list, dropdown_choices 
 
@@ -9500,7 +9504,7 @@ def generate_dropdown_model_list(current_model_type):
 
     dropdown_models = gr.Dropdown(
         choices= sorted_models,
-        value= get_base_model_type(current_model_type),
+        value= get_parent_model_type(current_model_type) if three_levels_hierarchy  else get_base_model_type(current_model_type),
         show_label= False,
         scale= 3 if len(sorted_finetunes) > 1 else 7, 
         elem_id="model_base_types_list",
@@ -9528,15 +9532,16 @@ def change_model_family(state, current_model_family):
     model_type = last_model_per_family.get(current_model_family, "")
     if len(model_type) == "" or model_type not in [choice[1] for choice in dropdown_choices] :  model_type = dropdown_choices[0][1]
 
-    parent_model_type = get_parent_model_type(model_type)
     if three_levels_hierarchy:
+        parent_model_type = get_parent_model_type(model_type)
         dropdown_choices = [ (*tup, get_parent_model_type(tup[1])) for tup in dropdown_choices] 
         dropdown_base_types_choices, finetunes_dict = create_models_hierarchy(dropdown_choices)
         dropdown_choices = finetunes_dict[parent_model_type ]
         model_finetunes_visible = len(dropdown_choices) > 1 
     else:
+        parent_model_type = get_base_model_type(model_type)
         model_finetunes_visible = True
-        dropdown_base_types_choices = list({get_parent_model_type(model[1]) for model in dropdown_choices})
+        dropdown_base_types_choices = list({get_base_model_type(model[1]) for model in dropdown_choices})
 
     return gr.Dropdown(choices= dropdown_base_types_choices, value = parent_model_type, scale=3 if model_finetunes_visible else 7), gr.Dropdown(choices= dropdown_choices, value = model_type, visible = model_finetunes_visible )
 
