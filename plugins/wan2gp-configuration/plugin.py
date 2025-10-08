@@ -36,6 +36,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
 
         self.request_component("state")
         self.request_component("resolution")
+        self.request_global("files_locator")
 
         self.add_tab(
             tab_id="configuration",
@@ -54,6 +55,16 @@ class ConfigTabPlugin(WAN2GPPlugin):
                     self.transformer_types_choices = gr.Dropdown(
                         choices=dropdown_choices, value=self.transformer_types,
                         label="Selectable Generative Models (leave empty for all)", multiselect=True
+                    )
+                    self.model_hierarchy_type_choice = gr.Dropdown(
+                        choices=[
+                            ("Two Levels: Model Family > Models & Finetunes", 0),
+                            ("Three Levels: Model Family > Models > Finetunes", 1),
+                        ],
+                        value=self.server_config.get("model_hierarchy_type", 1),
+                        label="Models Hierarchy In User Interface",
+                        visible=self.args.betatest if hasattr(self.args, 'betatest') else False,
+                        interactive=not self.args.lock_config
                     )
                     self.fit_canvas_choice = gr.Dropdown(
                         choices=[
@@ -101,6 +112,14 @@ class ConfigTabPlugin(WAN2GPPlugin):
                     self.max_frames_multiplier_choice = gr.Dropdown(
                         choices=[("Default", 1), ("x2", 2), ("x3", 3), ("x4", 4), ("x5", 5)],
                         value=self.server_config.get("max_frames_multiplier", 1), label="Max Frames Multiplier (requires restart)"
+                    )
+                    default_paths = self.files_locator.default_checkpoints_paths
+                    checkpoints_paths_text = "\n".join(self.server_config.get("checkpoints_paths", default_paths))
+                    self.checkpoints_paths_choice = gr.Textbox(
+                        label="Model Checkpoint Folders (One Path per Line. First is Default Download Path)",
+                        value=checkpoints_paths_text,
+                        lines=3,
+                        interactive=not self.args.lock_config
                     )
                     self.UI_theme_choice = gr.Dropdown(
                         choices=[("Blue Sky (Default)", "default"), ("Classic Gradio", "gradio")],
@@ -173,7 +192,16 @@ class ConfigTabPlugin(WAN2GPPlugin):
          fit_canvas_choice, preload_in_VRAM_choice, depth_anything_v2_variant_choice,
          notification_sound_enabled_choice, notification_sound_volume_choice, max_frames_multiplier_choice,
          display_stats_choice, video_output_codec_choice, image_output_codec_choice, audio_output_codec_choice,
-         enabled_plugins_choice, sort_plugins_alphabetically_choice, last_resolution_choice) = args
+         enabled_plugins_choice, sort_plugins_alphabetically_choice, 
+         model_hierarchy_type_choice, checkpoints_paths_choice, last_resolution_choice) = args
+
+        if len(checkpoints_paths_choice.strip()) == 0:
+            checkpoints_paths = self.files_locator.default_checkpoints_paths
+        else:
+            checkpoints_paths = checkpoints_paths_choice.replace("\r", "").split("\n")
+            checkpoints_paths = [path.strip() for path in checkpoints_paths if len(path.strip()) > 0]
+
+        self.files_locator.set_checkpoints_paths(checkpoints_paths)
 
         new_server_config = {
             "attention_mode": attention_choice, "transformer_types": transformer_types_choices,
@@ -194,7 +222,11 @@ class ConfigTabPlugin(WAN2GPPlugin):
             "audio_output_codec": audio_output_codec_choice,
             "enabled_plugins": enabled_plugins_choice,
             "sort_plugins_alphabetically": sort_plugins_alphabetically_choice,
-            "last_model_type": state["model_type"], "last_model_per_family": state["last_model_per_family"],
+            "model_hierarchy_type": model_hierarchy_type_choice, # ADDED
+            "checkpoints_paths": checkpoints_paths, # ADDED
+            "last_model_type": state["model_type"],
+            "last_model_per_family": state["last_model_per_family"],
+            "last_model_per_type": state["last_model_per_type"], # ADDED
             "last_advanced_choice": state["advanced"], "last_resolution_choice": last_resolution_choice,
             "last_resolution_per_group": state["last_resolution_per_group"],
         }
@@ -227,7 +259,8 @@ class ConfigTabPlugin(WAN2GPPlugin):
             self.preload_in_VRAM_choice, self.depth_anything_v2_variant_choice, self.notification_sound_enabled_choice,
             self.notification_sound_volume_choice, self.max_frames_multiplier_choice, self.display_stats_choice,
             self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, 
-            self.enabled_plugins_choice, self.sort_plugins_alphabetically_choice, resolution
+            self.enabled_plugins_choice, self.sort_plugins_alphabetically_choice, 
+            self.model_hierarchy_type_choice, self.checkpoints_paths_choice, resolution
         ]
 
         self.apply_btn.click(
