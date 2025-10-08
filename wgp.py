@@ -10558,6 +10558,7 @@ def create_ui():
                     state_dict=state.value, 
                     ui_defaults=get_default_settings(transformer_type), 
                     model_family=model_family, 
+                    model_base_type_choice=model_base_type_choice,
                     model_choice=model_choice, 
                     header=header, 
                     main=main, 
