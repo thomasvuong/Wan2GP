@@ -306,9 +306,8 @@ def edit_task_in_queue(
     new_inputs.pop('lset_name', None)
 
     if 'loras_choices' in new_inputs:
-        all_loras = state.get("loras", [])
         lora_indices = new_inputs.pop('loras_choices')
-        activated_lora_filenames = [Path(all_loras[int(index)]).name for index in lora_indices]
+        activated_lora_filenames = [Path(filename).name for filename in lora_indices]
         new_inputs['activated_loras'] = activated_lora_filenames
 
     gen = get_gen_info(state)
@@ -358,7 +357,7 @@ def edit_task_in_queue(
     gr.Info(f"Task ID {task_to_edit['id']} has been updated successfully.")
     edited_index = state["editing_task_index"]
     state["editing_task_index"] = None
-    return edited_index
+    return edited_index, gr.Tabs(selected="video_gen")
 
 def process_prompt_and_add_tasks(state, model_choice):
     def ret():
@@ -9031,7 +9030,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 ).then(
                     fn=edit_task_in_queue,
                     inputs=edit_inputs_components + [state],
-                    outputs=[js_trigger_index]
+                    outputs=[js_trigger_index, main_tabs]
                 )
                 js_trigger_index.change(
                     fn=None,
