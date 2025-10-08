@@ -33,10 +33,10 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.request_global("release_model")
         self.request_global("get_sorted_dropdown")
         self.request_global("app")
+        self.request_global("fl")
 
         self.request_component("state")
         self.request_component("resolution")
-        self.request_global("files_locator")
 
         self.add_tab(
             tab_id="configuration",
@@ -50,7 +50,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
         with gr.Column():
             with gr.Tabs():
                 with gr.Tab("General"):
-                    _ , dropdown_choices = self.get_sorted_dropdown(self.displayed_model_types, None)
+                    _, _, dropdown_choices = self.get_sorted_dropdown(self.displayed_model_types, None, None, False)
 
                     self.transformer_types_choices = gr.Dropdown(
                         choices=dropdown_choices, value=self.transformer_types,
@@ -113,7 +113,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
                         choices=[("Default", 1), ("x2", 2), ("x3", 3), ("x4", 4), ("x5", 5)],
                         value=self.server_config.get("max_frames_multiplier", 1), label="Max Frames Multiplier (requires restart)"
                     )
-                    default_paths = self.files_locator.default_checkpoints_paths
+                    default_paths = self.fl.default_checkpoints_paths
                     checkpoints_paths_text = "\n".join(self.server_config.get("checkpoints_paths", default_paths))
                     self.checkpoints_paths_choice = gr.Textbox(
                         label="Model Checkpoint Folders (One Path per Line. First is Default Download Path)",
@@ -196,12 +196,12 @@ class ConfigTabPlugin(WAN2GPPlugin):
          model_hierarchy_type_choice, checkpoints_paths_choice, last_resolution_choice) = args
 
         if len(checkpoints_paths_choice.strip()) == 0:
-            checkpoints_paths = self.files_locator.default_checkpoints_paths
+            checkpoints_paths = self.fl.default_checkpoints_paths
         else:
             checkpoints_paths = checkpoints_paths_choice.replace("\r", "").split("\n")
             checkpoints_paths = [path.strip() for path in checkpoints_paths if len(path.strip()) > 0]
 
-        self.files_locator.set_checkpoints_paths(checkpoints_paths)
+        self.fl.set_checkpoints_paths(checkpoints_paths)
 
         new_server_config = {
             "attention_mode": attention_choice, "transformer_types": transformer_types_choices,
