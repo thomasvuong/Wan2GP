@@ -2646,8 +2646,9 @@ def download_models(model_filename = None, model_type= None, module_type = False
 
         preload_URLs = get_model_recursive_prop(model_type, "preload_URLs", return_list= True)
         for url in preload_URLs:
-            filename = fl.get_download_location(url.split("/")[-1])
-            if not os.path.isfile(filename ): 
+            filename = fl.locate_file(os.path.basename(url))
+            if filename is None: 
+                filename = fl.get_download_location(os.path.basename(url))
                 if not url.startswith("http"):
                     raise Exception(f"File '{filename}' to preload was not found locally and no URL was provided to download it. Please add an URL in the model definition file.")
                 try:
@@ -5206,6 +5207,7 @@ def generate_video(
                             if any_mask: save_video( src_mask2, "masks2.mp4", fps, value_range=(0, 1))
                 if video_guide is not None:                        
                     preview_frame_no = 0 if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else (guide_start_frame - window_start_frame) 
+                    preview_frame_no = min(src_video.shape[1] -1, preview_frame_no)
                     refresh_preview["video_guide"] = convert_tensor_to_image(src_video, preview_frame_no)
                     if src_video2 is not None:
                         refresh_preview["video_guide"] = [refresh_preview["video_guide"], convert_tensor_to_image(src_video2, preview_frame_no)] 
