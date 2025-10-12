@@ -155,6 +155,19 @@ def get_pastel_color(index):
     lightness = 92
     return f"hsl({hue}, {saturation}%, {lightness}%)"
 
+def get_alternating_grey_color(index):
+    if index % 2 == 0:
+        return "#F8FAFC"
+    else:
+        return "transparent"
+
+def get_queue_item_color(index):
+    scheme = server_config.get("queue_color_scheme", "pastel")
+    if scheme == "alternating_grey":
+        return get_alternating_grey_color(index)
+    else:
+        return get_pastel_color(index)
+
 def format_generation_time(seconds):
     """Format generation time showing raw seconds with human-readable time in parentheses when over 60s"""
     raw_seconds = f"{int(seconds)}s"
@@ -896,7 +909,7 @@ def add_video_task(**inputs):
     queue = gen["queue"]
     task_id += 1
     current_task_id = task_id
-    item_color = get_pastel_color(current_task_id)
+    item_color = get_queue_item_color(current_task_id)
 
     start_image_data, end_image_data, start_image_labels, end_image_labels = get_preview_images(inputs)
 
@@ -1247,7 +1260,7 @@ def load_queue_action(filepath, state, evt:gr.EventData):
                 newly_loaded_queue.append(runtime_task)
                 print(f"[load_queue_action] Reconstructed task {task_index+1}/{len(loaded_manifest)}, ID: {task_id_loaded}")
         for i, task in enumerate(newly_loaded_queue):
-            task['color'] = get_pastel_color(i)
+            task['color'] = get_queue_item_color(i)
 
         with lock:
             print("[load_queue_action] Acquiring lock to update state...")
@@ -2082,6 +2095,7 @@ if not Path(server_config_filename).is_file():
         "preload_model_policy": [],
         "UI_theme": "default",
         "checkpoints_paths": fl.default_checkpoints_paths,
+		"queue_color_scheme": "pastel",
         "model_hierarchy_type": 1,
     }
 
@@ -3289,6 +3303,7 @@ def apply_changes(  state,
                     audio_output_codec_choice = None,
                     last_resolution_choice = None,
                     checkpoints_paths = "",
+					queue_color_scheme_choice = "pastel",
 ):
     checkpoints_paths = fl.default_checkpoints_paths if len(checkpoints_paths.strip()) == "" else checkpoints_paths.replace("\r", "").split("\n")
     checkpoints_paths = [path.strip() for path in checkpoints_paths if len(path.strip()) > 0 ]
@@ -3337,6 +3352,7 @@ def apply_changes(  state,
         "last_resolution_choice": last_resolution_choice, 
         "last_resolution_per_group":  state["last_resolution_per_group"],
         "checkpoints_paths": checkpoints_paths,
+		"queue_color_scheme": queue_color_scheme_choice,
     }
 
     if Path(server_config_filename).is_file():
@@ -3379,7 +3395,7 @@ def apply_changes(  state,
         reset_prompt_enhancer()
     if all(change in ["attention_mode", "vae_config", "boost", "save_path", "metadata_type", "clear_file_list", "fit_canvas", "depth_anything_v2_variant", 
                       "notification_sound_enabled", "notification_sound_volume", "mmaudio_enabled", "max_frames_multiplier", "display_stats",
-                      "video_output_codec", "image_output_codec", "audio_output_codec", "checkpoints_paths", "model_hierarchy_type"] for change in changes ):
+                      "video_output_codec", "image_output_codec", "audio_output_codec", "checkpoints_paths", "model_hierarchy_type", "queue_color_scheme"] for change in changes ):
         model_family = gr.Dropdown()
         model_base_type = gr.Dropdown()
         model_choice = gr.Dropdown()
@@ -3536,21 +3552,20 @@ def refresh_gallery(state): #, msg
 
         if len(header_text) > 0:
             prompt =  "<I>" + header_text + "</I><BR><BR>" + prompt
-        list_uri = []
-        list_labels = []
-        start_img_uri = task.get('start_image_data_base64')
-        if start_img_uri != None:
-            list_uri += start_img_uri
-            list_labels += task.get('start_image_labels')
-        end_img_uri = task.get('end_image_data_base64')
-        if end_img_uri != None:
-            list_uri += end_img_uri
-            list_labels += task.get('end_image_labels')
-
         thumbnail_size = "100px"
         thumbnails = ""
-        for i, (img_label, img_uri) in enumerate(zip(list_labels,list_uri)):
-            thumbnails += f'<TD onclick=sendColIndex({i})><div class="hover-image" ><img src="{img_uri}" alt="{img_label}" style="max-width:{thumbnail_size}; max-height:{thumbnail_size}; display: block; margin: auto; object-fit: contain;" /><span class="tooltip">{img_label}</span></div></TD>'  
+        
+        start_img_data = task.get('start_image_data_base64')
+        start_img_labels = task.get('start_image_labels')
+        if start_img_data and start_img_labels:
+            for i, (img_uri, img_label) in enumerate(zip(start_img_data, start_img_labels)):
+                thumbnails += f'<td><div class="hover-image" onclick="showImageModal(\'current_start_{i}\')"><img src="{img_uri}" alt="{img_label}" style="max-width:{thumbnail_size}; max-height:{thumbnail_size}; display: block; margin: auto; object-fit: contain;" /><span class="tooltip">{img_label}</span></div></td>'
+        
+        end_img_data = task.get('end_image_data_base64')
+        end_img_labels = task.get('end_image_labels')
+        if end_img_data and end_img_labels:
+            for i, (img_uri, img_label) in enumerate(zip(end_img_data, end_img_labels)):
+                thumbnails += f'<td><div class="hover-image" onclick="showImageModal(\'current_end_{i}\')"><img src="{img_uri}" alt="{img_label}" style="max-width:{thumbnail_size}; max-height:{thumbnail_size}; display: block; margin: auto; object-fit: contain;" /><span class="tooltip">{img_label}</span></div></td>'
         
         # Get current theme from server config  
         current_theme = server_config.get("UI_theme", "default")
@@ -7545,14 +7560,22 @@ def show_modal_image(state, action_string):
         return gr.HTML(), gr.Column(visible=False)
 
     try:
-        img_type, row_index_str = action_string.split('_')
-        row_index = int(row_index_str)
+        parts = action_string.split('_')
+        gen = get_gen_info(state)
+        queue = gen.get("queue", [])
+        
+        if parts[0] == 'current':
+            img_type = parts[1]
+            img_index = int(parts[2])
+            task_index = 0
+        else:
+            img_type = parts[0]
+            row_index = int(parts[1])
+            img_index = 0
+            task_index = row_index + 1
+            
     except (ValueError, IndexError):
         return gr.HTML(), gr.Column(visible=False)
-
-    gen = get_gen_info(state)
-    queue = gen.get("queue", [])
-    task_index = row_index + 1
 
     if task_index >= len(queue):
         return gr.HTML(), gr.Column(visible=False)
@@ -7568,10 +7591,10 @@ def show_modal_image(state, action_string):
         image_data = task_item.get('end_image_data_base64')
         label_data = task_item.get('end_image_labels')
 
-    if not image_data or not label_data:
+    if not image_data or not label_data or img_index >= len(image_data):
         return gr.HTML(), gr.Column(visible=False)
 
-    html_content = get_modal_image(image_data[0], label_data[0])
+    html_content = get_modal_image(image_data[img_index], label_data[img_index])
     return gr.HTML(value=html_content), gr.Column(visible=True)
 
 def get_prompt_labels(multi_prompts_gen_type, image_outputs = False):
@@ -8710,7 +8733,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             if not update_form:
                 with gr.Row(visible=(tab_id == 'edit')):
                     edit_btn = gr.Button("Apply Edits", elem_id="edit_tab_apply_button")
-                    cancel_btn = gr.Button("Cancel")
+                    cancel_btn = gr.Button("Cancel", elem_id="edit_tab_cancel_button")
                     silent_cancel_btn = gr.Button("Silent Cancel", elem_id="silent_edit_tab_cancel_button", visible=False)
             with gr.Row():
                 save_settings_btn = gr.Button("Set Settings as Default", visible = not args.lock_config)
@@ -9410,7 +9433,14 @@ def generate_configuration_tab(state, blocks, header, model_family, model_base_t
                     value=server_config.get("UI_theme", "default"),
                     label="User Interface Theme. You will need to restart the App the see new Theme."
                 )
-
+                queue_color_scheme_choice = gr.Dropdown(
+                    choices=[
+                        ("Pastel (Unique color for each item)", "pastel"),
+                        ("Alternating Grey Shades", "alternating_grey"),
+                    ],
+                    value=server_config.get("queue_color_scheme", "pastel"),
+                    label="Queue Color Scheme"
+                )
 
             with gr.Tab("Performance"):
 
@@ -9649,6 +9679,7 @@ def generate_configuration_tab(state, blocks, header, model_family, model_base_t
                     audio_output_codec_choice,
                     resolution,
                     checkpoints_paths,
+					queue_color_scheme_choice,
                 ],
                 outputs= [msg , header, model_family, model_base_type_choice, model_choice, refresh_form_trigger]
         )
@@ -10110,9 +10141,16 @@ def create_ui():
             color: white !important;
             transition: background-color 0.2s ease-in-out;
         }
-
         #edit_tab_apply_button:hover {
             background-color: #d82333 !important;
+        }
+        #edit_tab_cancel_button {
+            background-color: #f2737e !important;
+            color: white !important;
+            transition: background-color 0.2s ease-in-out;
+        }
+        #edit_tab_cancel_button:hover {
+            background-color: #e2505c !important;
         }
         #queue_html_container table {
             font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
