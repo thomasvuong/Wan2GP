@@ -63,9 +63,8 @@ from collections import defaultdict
 global_queue_ref = []
 AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
-
-target_mmgp_version = "3.6.2"
-WanGP_version = "8.995"
+target_mmgp_version = "3.6.3"
+WanGP_version = "8.996"
 settings_version = 2.39
 max_source_video_frames = 3000
 prompt_enhancer_image_caption_model, prompt_enhancer_image_caption_processor, prompt_enhancer_llm_model, prompt_enhancer_llm_tokenizer = None, None, None, None
@@ -150,12 +149,29 @@ def format_time(seconds):
     else:
         return f"{seconds:.1f}s"
 
-    
 def get_pastel_color(index):
     hue = (index * 137) % 360
     saturation = 75
     lightness = 92
     return f"hsl({hue}, {saturation}%, {lightness}%)"
+
+def format_generation_time(seconds):
+    """Format generation time showing raw seconds with human-readable time in parentheses when over 60s"""
+    raw_seconds = f"{int(seconds)}s"
+    
+    if seconds < 60:
+        return raw_seconds
+    
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    
+    if hours > 0:
+        human_readable = f"{hours}h {minutes}m {secs}s"
+    else:
+        human_readable = f"{minutes}m {secs}s"
+    
+    return f"{raw_seconds} ({human_readable})"
 
 def pil_to_base64_uri(pil_image, format="png", quality=75):
     if pil_image is None:
@@ -2066,6 +2082,7 @@ if not Path(server_config_filename).is_file():
         "preload_model_policy": [],
         "UI_theme": "default",
         "checkpoints_paths": fl.default_checkpoints_paths,
+        "model_hierarchy_type": 1,
     }
 
     with open(server_config_filename, "w", encoding="utf-8") as writer:
@@ -2078,7 +2095,7 @@ else:
 checkpoints_paths = server_config.get("checkpoints_paths", None)
 if checkpoints_paths is None: checkpoints_paths = server_config["checkpoints_paths"] = fl.default_checkpoints_paths
 fl.set_checkpoints_paths(checkpoints_paths)
-three_levels_hierarchy = server_config.get("model_hierarchy_type", 0) == 1
+three_levels_hierarchy = server_config.get("model_hierarchy_type", 0) == 1 and args.betatest
 
 #   Deprecated models
 for path in  ["wan2.1_Vace_1.3B_preview_bf16.safetensors", "sky_reels2_diffusion_forcing_1.3B_bf16.safetensors","sky_reels2_diffusion_forcing_720p_14B_bf16.safetensors",
@@ -2884,8 +2901,9 @@ def download_models(model_filename = None, model_type= None, module_type = False
 
         preload_URLs = get_model_recursive_prop(model_type, "preload_URLs", return_list= True)
         for url in preload_URLs:
-            filename = fl.get_download_location(url.split("/")[-1])
-            if not os.path.isfile(filename ): 
+            filename = fl.locate_file(os.path.basename(url))
+            if filename is None: 
+                filename = fl.get_download_location(os.path.basename(url))
                 if not url.startswith("http"):
                     raise Exception(f"File '{filename}' to preload was not found locally and no URL was provided to download it. Please add an URL in the model definition file.")
                 try:
@@ -3750,7 +3768,7 @@ def select_video(state, input_file_list, event_data: gr.EventData):
             video_num_inference_steps = configs.get("num_inference_steps", 0)
             video_creation_date = str(get_file_creation_date(file_name))
             if "." in video_creation_date: video_creation_date = video_creation_date[:video_creation_date.rfind(".")]
-            video_generation_time =  str(configs.get("generation_time", "0")) + "s"
+            video_generation_time = format_generation_time(float(configs.get("generation_time", "0")))
             video_activated_loras = configs.get("activated_loras", [])
             video_loras_multipliers = configs.get("loras_multipliers", "")
             video_loras_multipliers =  preparse_loras_multipliers(video_loras_multipliers)
@@ -3767,6 +3785,9 @@ def select_video(state, input_file_list, event_data: gr.EventData):
             if len(video_outpainting) >0:
                 values += [video_outpainting]
                 labels += ["Outpainting"]
+            if "G" in video_video_prompt_type and "V" in video_video_prompt_type:
+                values += [configs.get("denoising_strength",1)]
+                labels += ["Denoising Strength"]
             video_sample_solver = configs.get("sample_solver", "")
             if model_def.get("sample_solvers", None) is not None and len(video_sample_solver) > 0 :
                 values += [video_sample_solver]
@@ -5080,6 +5101,7 @@ def generate_video(
     trans.cache = skip_steps_cache
     if trans2 is not None: trans2.cache = skip_steps_cache
     face_arc_embeds = None
+    src_ref_images = src_ref_masks = None
     output_new_audio_data = None
     output_new_audio_filepath = None
     original_audio_guide = audio_guide
@@ -5174,7 +5196,7 @@ def generate_video(
 
     first_window_video_length = current_video_length
     original_prompts = prompts.copy()
-    gen["sliding_window"] = sliding_window    
+    gen["sliding_window"] = sliding_window 
     while not abort: 
         extra_generation += gen.get("extra_orders",0)
         gen["extra_orders"] = 0
@@ -5184,7 +5206,7 @@ def generate_video(
         if repeat_no >= total_generation: break
         repeat_no +=1
         gen["repeat_no"] = repeat_no
-        src_video = src_video2 = src_mask = src_mask2 = src_faces = src_ref_images = src_ref_masks = sparse_video_image = None
+        src_video = src_video2 = src_mask = src_mask2 = src_faces = sparse_video_image = None
         prefix_video = pre_video_frame = None
         source_video_overlap_frames_count = 0 # number of frames overalapped in source video for first window
         source_video_frames_count = 0  # number of frames to use in source video (processing starts source_video_overlap_frames_count frames before )
@@ -5443,6 +5465,7 @@ def generate_video(
                             if any_mask: save_video( src_mask2, "masks2.mp4", fps, value_range=(0, 1))
                 if video_guide is not None:                        
                     preview_frame_no = 0 if extract_guide_from_window_start or model_def.get("dont_cat_preguide", False) or sparse_video_image is not None else (guide_start_frame - window_start_frame) 
+                    preview_frame_no = min(src_video.shape[1] -1, preview_frame_no)
                     refresh_preview["video_guide"] = convert_tensor_to_image(src_video, preview_frame_no)
                     if src_video2 is not None:
                         refresh_preview["video_guide"] = [refresh_preview["video_guide"], convert_tensor_to_image(src_video2, preview_frame_no)] 
@@ -6340,7 +6363,7 @@ def apply_lset(state, wizard_prompt_activated, lset_name, loras_choices, loras_m
     lset_name = get_lset_name(state, lset_name)
     if len(lset_name) == 0:
         gr.Info("Please choose a Lora Preset or Setting File in the list or create one")
-        return wizard_prompt_activated, loras_choices, loras_mult_choices, prompt, gr.update(), gr.update(), gr.update(), gr.update()
+        return wizard_prompt_activated, loras_choices, loras_mult_choices, prompt, gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
     else:
         current_model_type = state["model_type"]
         ui_settings = get_current_model_settings(state)
@@ -6364,7 +6387,8 @@ def apply_lset(state, wizard_prompt_activated, lset_name, loras_choices, loras_m
 
             return wizard_prompt_activated, loras_choices, loras_mult_choices, prompt, get_unique_id(), gr.update(), gr.update(), gr.update(), gr.update()
         else:
-            lset_path =  os.path.join("profiles" if len(Path(lset_name).parts)>1 else get_lora_dir(current_model_type), lset_name)
+            accelerator_profile =  len(Path(lset_name).parts)>1 
+            lset_path =  os.path.join("profiles" if accelerator_profile else get_lora_dir(current_model_type), lset_name)
             configs, _ = get_settings_from_file(state,lset_path , True, True, True, min_settings_version=2.38, merge_loras = "merge after" if  len(Path(lset_name).parts)<=1 else "merge before" )
 
             if configs == None:
@@ -6372,7 +6396,10 @@ def apply_lset(state, wizard_prompt_activated, lset_name, loras_choices, loras_m
                 return [gr.update()] * 9
             model_type = configs["model_type"]
             configs["lset_name"] = lset_name
-            gr.Info(f"Settings File '{lset_name}' has been applied")
+            if accelerator_profile:
+                gr.Info(f"Accelerator Profile '{os.path.splitext(os.path.basename(lset_name))[0]}' has been applied")
+            else:
+                gr.Info(f"Settings File '{os.path.basename(lset_name)}' has been applied")
             help = configs.get("help", None)
             if help is not None: gr.Info(help)
             if model_type == current_model_type:
@@ -6885,13 +6912,13 @@ def use_video_settings(state, input_file_list, choice):
             else:
                 gr.Info(f"Settings Loaded from Video with prompt '{prompt[:100]}'")
             if models_compatible:
-                return gr.update(), gr.update(), str(time.time())
+                return gr.update(), gr.update(), gr.update(), str(time.time())
             else:
                 return *generate_dropdown_model_list(model_type), gr.update()
     else:
         gr.Info(f"No Video is Selected")
 
-    return gr.update(), gr.update()
+    return gr.update(), gr.update(), gr.update(), gr.update()
 loras_url_cache = None
 def update_loras_url_cache(lora_dir, loras_selected):
     if loras_selected is None: return None
@@ -6958,7 +6985,6 @@ def get_settings_from_file(state, file_path, allow_json, merge_with_defaults, sw
     if configs is None: return None, False
         
 
-    current_model_filename = state["model_filename"]
     current_model_type = state["model_type"]
     
     model_type = configs.get("model_type", None)
@@ -6966,7 +6992,7 @@ def get_settings_from_file(state, file_path, allow_json, merge_with_defaults, sw
         model_type = configs.get("base_model_type", None)
   
     if model_type == None:
-        model_filename = configs.get("model_filename", current_model_filename)
+        model_filename = configs.get("model_filename", "")
         model_type = get_model_type(model_filename)
         if model_type == None:
             model_type = current_model_type
@@ -7047,7 +7073,7 @@ def load_settings_from_file(state, file_path):
 
     if model_type == current_model_type:
         set_model_settings(state, current_model_type, configs)        
-        return gr.update(), gr.update(), gr.update(), gr.update(), str(time.time()), None
+        return gr.update(), gr.update(), gr.update(), str(time.time()), None
     else:
         set_model_settings(state, model_type, configs)        
         return *generate_dropdown_model_list(model_type), gr.update(), None
