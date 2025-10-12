@@ -239,27 +239,31 @@ def process_prompt_and_add_tasks(state, model_choice):
         if frames_count > max_source_video_frames:
             gr.Info(f"Post processing is not supported on videos longer than {max_source_video_frames} frames. Output Video will be truncated")
             # return
-        for k in ["image_start", "image_end", "image_refs", "video_guide", "audio_guide", "audio_guide2", "audio_source" , "video_mask", "image_mask"]:
+        for prop in ["state", "model_type", "mode"]:
+            edit_overrides[prop] = inputs[prop]
+        for k,v in inputs.items():
             inputs[k] = None    
         inputs.update(edit_overrides)
         del gen["edit_video_source"], gen["edit_overrides"]
         inputs["video_source"]= edit_video_source 
         prompt = []
 
-        spatial_upsampling = inputs.get("spatial_upsampling","")
-        if len(spatial_upsampling) >0: prompt += ["Spatial Upsampling"]
-        temporal_upsampling = inputs.get("temporal_upsampling","")
-        if len(temporal_upsampling) >0: prompt += ["Temporal Upsampling"]
-        if has_image_file_extension(edit_video_source)  and len(temporal_upsampling) > 0:
-            gr.Info("Temporal Upsampling can not be used with an Image")
-            return ret()
-        film_grain_intensity  = inputs.get("film_grain_intensity",0)
-        film_grain_saturation  = inputs.get("film_grain_saturation",0.5)        
-        # if film_grain_intensity >0: prompt += [f"Film Grain: intensity={film_grain_intensity}, saturation={film_grain_saturation}"]
-        if film_grain_intensity >0: prompt += ["Film Grain"]
-        MMAudio_setting = inputs.get("MMAudio_setting",0)
-        repeat_generation= inputs.get("repeat_generation",1)
-        if mode =="edit_remux":
+        repeat_generation = 1
+        if mode == "edit_postprocessing":
+            spatial_upsampling = inputs.get("spatial_upsampling","")
+            if len(spatial_upsampling) >0: prompt += ["Spatial Upsampling"]
+            temporal_upsampling = inputs.get("temporal_upsampling","")
+            if len(temporal_upsampling) >0: prompt += ["Temporal Upsampling"]
+            if has_image_file_extension(edit_video_source)  and len(temporal_upsampling) > 0:
+                gr.Info("Temporal Upsampling can not be used with an Image")
+                return ret()
+            film_grain_intensity  = inputs.get("film_grain_intensity",0)
+            film_grain_saturation  = inputs.get("film_grain_saturation",0.5)        
+            # if film_grain_intensity >0: prompt += [f"Film Grain: intensity={film_grain_intensity}, saturation={film_grain_saturation}"]
+            if film_grain_intensity >0: prompt += ["Film Grain"]
+        elif mode =="edit_remux":
+            MMAudio_setting = inputs.get("MMAudio_setting",0)
+            repeat_generation= inputs.get("repeat_generation",1)
             audio_source = inputs["audio_source"]
             if  MMAudio_setting== 1:
                 prompt += ["MMAudio"]
@@ -270,9 +274,9 @@ def process_prompt_and_add_tasks(state, model_choice):
                     gr.Info("You must provide a custom Audio")
                     return ret()
                 prompt += ["Custom Audio"]
-                repeat_generation == 1
-
-        seed = inputs.get("seed",None)
+                repeat_generation = 1
+            seed = inputs.get("seed",None)
+        inputs["repeat_generation"] = repeat_generation
         if len(prompt) == 0:
             if mode=="edit_remux":
                 gr.Info("You must choose at least one Remux Method")
@@ -564,7 +568,7 @@ def process_prompt_and_add_tasks(state, model_choice):
 
     if test_any_sliding_window(model_type) and image_mode == 0:
         if video_length > sliding_window_size:
-            if model_type in ["t2v", "t2v_2_2"] and not "G" in video_prompt_type :
+            if test_class_t2v(model_type) and not "G" in video_prompt_type :
                 gr.Info(f"You have requested to Generate Sliding Windows with a Text to Video model. Unless you use the Video to Video feature this is useless as a t2v model doesn't see past frames and it will generate the same video in each new window.") 
                 return ret()
             full_video_length = video_length if video_source is None else video_length +  sliding_window_overlap -1
@@ -728,10 +732,10 @@ def add_video_task(**inputs):
     queue.append({
         "id": current_task_id,
         "params": inputs.copy(),
-        "repeats": inputs["repeat_generation"],
-        "length": inputs["video_length"], # !!!
-        "steps": inputs["num_inference_steps"],
-        "prompt": inputs["prompt"],
+        "repeats": inputs.get("repeat_generation",1),
+        "length": inputs.get("video_length",1), 
+        "steps": inputs.get("num_inference_steps",1),
+        "prompt": inputs.get("prompt", ""),
         "start_image_labels": start_image_labels,
         "end_image_labels": end_image_labels,
         "start_image_data": start_image_data,
@@ -1961,6 +1965,10 @@ def test_class_i2v(model_type):
 def test_vace_module(model_type):
     model_def = get_model_def(model_type)
     return model_def.get("vace_class", False)
+
+def test_class_t2v(model_type):
+    model_def = get_model_def(model_type)
+    return model_def.get("t2v_class", False)
 
 def test_any_sliding_window(model_type):
     model_def = get_model_def(model_type)
@@ -4208,7 +4216,7 @@ def edit_video(
     abort = False
 		
 		
-	
+    MMAudio_setting = MMAudio_setting or 0
     configs, _ = get_settings_from_file(state, video_source, False, False, False)
     if configs == None: configs = { "type" : get_model_record("Post Processing") }
 
@@ -4234,28 +4242,31 @@ def edit_video(
     frames_count = min(frames_count, max_source_video_frames)
     sample = None
 
-    if len(temporal_upsampling) > 0 or len(spatial_upsampling) > 0 or film_grain_intensity > 0:                
-        send_cmd("progress", [0, get_latest_status(state,"Upsampling" if len(temporal_upsampling) > 0 or len(spatial_upsampling) > 0 else "Adding Film Grain"  )])
-        sample = get_resampled_video(video_source, 0, max_source_video_frames, fps)
-        sample = sample.float().div_(127.5).sub_(1.).permute(-1,0,1,2)
-        frames_count = sample.shape[1] 
+    if mode == "edit_postprocessing":
+        if len(temporal_upsampling) > 0 or len(spatial_upsampling) > 0 or film_grain_intensity > 0:                
+            send_cmd("progress", [0, get_latest_status(state,"Upsampling" if len(temporal_upsampling) > 0 or len(spatial_upsampling) > 0 else "Adding Film Grain"  )])
+            sample = get_resampled_video(video_source, 0, max_source_video_frames, fps)
+            sample = sample.float().div_(127.5).sub_(1.).permute(-1,0,1,2)
+            frames_count = sample.shape[1] 
 
-    output_fps  = round(fps)
-    if len(temporal_upsampling) > 0:
-        sample, previous_last_frame, output_fps = perform_temporal_upsampling(sample, None, temporal_upsampling, fps)
-        configs["temporal_upsampling"] = temporal_upsampling
-        frames_count = sample.shape[1] 
+        output_fps  = round(fps)
+        if len(temporal_upsampling) > 0:
+            sample, previous_last_frame, output_fps = perform_temporal_upsampling(sample, None, temporal_upsampling, fps)
+            configs["temporal_upsampling"] = temporal_upsampling
+            frames_count = sample.shape[1] 
 
 
-    if len(spatial_upsampling) > 0:
-        sample = perform_spatial_upsampling(sample, spatial_upsampling )
-        configs["spatial_upsampling"] = spatial_upsampling
+        if len(spatial_upsampling) > 0:
+            sample = perform_spatial_upsampling(sample, spatial_upsampling )
+            configs["spatial_upsampling"] = spatial_upsampling
 
-    if film_grain_intensity > 0:
-        from postprocessing.film_grain import add_film_grain
-        sample = add_film_grain(sample, film_grain_intensity, film_grain_saturation) 
-        configs["film_grain_intensity"] = film_grain_intensity
-        configs["film_grain_saturation"] = film_grain_saturation
+        if film_grain_intensity > 0:
+            from postprocessing.film_grain import add_film_grain
+            sample = add_film_grain(sample, film_grain_intensity, film_grain_saturation) 
+            configs["film_grain_intensity"] = film_grain_intensity
+            configs["film_grain_saturation"] = film_grain_saturation
+    else:
+        output_fps  = round(fps)
 
     any_mmaudio = MMAudio_setting != 0 and server_config.get("mmaudio_enabled", 0) != 0 and frames_count >=output_fps
     if any_mmaudio: download_mmaudio()
@@ -5379,10 +5390,11 @@ def generate_video(
                 skip_steps_cache.previous_residual = None
                 skip_steps_cache.previous_modulated_input = None
                 print(f"Skipped Steps:{skip_steps_cache.skipped_steps}/{skip_steps_cache.num_steps}" )
-
+            BGRA_frames = None
             if samples != None:
                 if isinstance(samples, dict):
                     overlapped_latents = samples.get("latent_slice", None)
+                    BGRA_frames = samples.get("BGRA_frames", None)
                     samples= samples["x"]
                 samples = samples.to("cpu")
             clear_gen_cache()
@@ -5463,7 +5475,10 @@ def generate_video(
                     file_name = f"{time_flag}_seed{seed}_{sanitize_file_name(truncate_for_filesystem(save_prompt,100)).strip()}.{extension}"
                 video_path = os.path.join(save_path, file_name)
                 any_mmaudio = MMAudio_setting != 0 and server_config.get("mmaudio_enabled", 0) != 0 and sample.shape[1] >=fps
-
+                if BGRA_frames is not None:
+                    from models.wan.alpha.utils import write_zip_file
+                    write_zip_file(os.path.splitext(video_path)[0] + ".zip", BGRA_frames)
+                    BGRA_frames = None 
                 if is_image:    
                     image_path = os.path.join(image_save_path, file_name)
                     sample =  sample.transpose(1,0)  #c f h w -> f c h w 
@@ -6311,7 +6326,7 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
         inputs["base_model_type"] = base_model_type
     diffusion_forcing = base_model_type in ["sky_df_1.3B", "sky_df_14B"]
     vace =  test_vace_module(base_model_type) 
-    t2v=   base_model_type in ["t2v", "t2v_2_2"]
+    t2v=   test_class_t2v(base_model_type) 
     ltxv = base_model_type in ["ltxv_13B"]
     recammaster = base_model_type in ["recam_1.3B"]
     phantom = base_model_type in ["phantom_1.3B", "phantom_14B"]
@@ -7621,7 +7636,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                         cancel_lset_btn = gr.Button("Don't do it !", size="sm", min_width= 1 , visible=False)  
                         #confirm_save_lset_btn, confirm_delete_lset_btn, save_lset_btn, delete_lset_btn, cancel_lset_btn
             trigger_refresh_input_type = gr.Text(interactive= False, visible= False)
-            t2v =  base_model_type in ["t2v", "t2v_2_2"] 
+            t2v =  test_class_t2v(base_model_type) 
             t2v_1_3B =  base_model_type in ["t2v_1.3B"] 
             flf2v = base_model_type == "flf2v_720p"
             base_model_family = get_model_family(base_model_type)
