@@ -7568,7 +7568,7 @@ def init_process_queue_if_any(state):
 
 def get_modal_image(image_base64, label):
     return f"""
-    <div class="modal-flex-container">
+    <div class="modal-flex-container" onclick="closeImageModal()">
         <div class="modal-content-wrapper" onclick="event.stopPropagation()">
             <div class="modal-close-btn" onclick="closeImageModal()">×</div>
             <div class="modal-label">{label}</div>
