@@ -7541,8 +7541,22 @@ def refresh_video_prompt_type_video_custom_checkbox(state, video_prompt_type, vi
 
 def refresh_preview(state):
     gen = get_gen_info(state)
-    preview = gen.get("preview", None)
-    return preview
+    preview_image = gen.get("preview", None)
+    if preview_image is None:
+        return ""
+    
+    preview_base64 = pil_to_base64_uri(preview_image, format="jpeg", quality=85)
+    if preview_base64 is None:
+        return ""
+
+    html_content = f"""
+    <div style="display: flex; justify-content: center; align-items: center; height: 200px; cursor: pointer;" onclick="showImageModal('preview_0')">
+        <img src="{preview_base64}"
+             style="max-height: 100%; max-width: 100%; object-fit: contain;" 
+             alt="Preview">
+    </div>
+    """
+    return html_content
 
 def init_process_queue_if_any(state):                
     gen = get_gen_info(state)
@@ -7553,7 +7567,15 @@ def init_process_queue_if_any(state):
         return gr.Button(visible=True), gr.Button(visible=False), gr.Column(visible=False)
 
 def get_modal_image(image_base64, label):
-    return "<DIV ALIGN=CENTER><IMG SRC=\"" + image_base64 + "\"><div style='position: absolute; top: 0; left: 0; background: rgba(0,0,0,0.7); color: white; padding: 5px; font-size: 12px;'>" + label + "</div></DIV>"
+    return f"""
+    <div class="modal-flex-container">
+        <div class="modal-content-wrapper" onclick="event.stopPropagation()">
+            <div class="modal-close-btn" onclick="closeImageModal()">×</div>
+            <div class="modal-label">{label}</div>
+            <img src="{image_base64}" class="modal-image" alt="{label}">
+        </div>
+    </div>
+    """
 
 def show_modal_image(state, action_string):
     if not action_string:
@@ -7563,8 +7585,16 @@ def show_modal_image(state, action_string):
         parts = action_string.split('_')
         gen = get_gen_info(state)
         queue = gen.get("queue", [])
-        
-        if parts[0] == 'current':
+
+        if parts[0] == 'preview':
+            preview_image = gen.get("preview", None)
+            if preview_image:
+                preview_base64 = pil_to_base64_uri(preview_image)
+                if preview_base64:
+                    html_content = get_modal_image(preview_base64, "Preview")
+                    return gr.HTML(value=html_content), gr.Column(visible=True)
+            return gr.HTML(), gr.Column(visible=False)
+        elif parts[0] == 'current':
             img_type = parts[1]
             img_index = int(parts[2])
             task_index = 0
@@ -7889,12 +7919,13 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
     with gr.Row():
         column_kwargs = {'elem_id': 'edit-tab-content'} if tab_id == 'edit' else {}
         with gr.Column(**column_kwargs):
-            with gr.Column(visible=False, elem_id="image-modal-container") as modal_container: 
-                with gr.Row(elem_id="image-modal-close-button-row"):
-                    close_modal_button = gr.Button("❌", size="sm", scale=1)
+            with gr.Column(visible=False, elem_id="image-modal-container") as modal_container:
                 modal_html_display = gr.HTML()
+                # These two are for opening the modal with content
                 modal_action_input = gr.Text(elem_id="modal_action_input", visible=False)
                 modal_action_trigger = gr.Button(elem_id="modal_action_trigger", visible=False)
+                # This hidden button is our new trigger for closing the modal
+                close_modal_trigger_btn = gr.Button(elem_id="modal_close_trigger_btn", visible=False)
             with gr.Row(visible= True): #len(loras)>0) as presets_column:
                 lset_choices = compute_lset_choices(model_type, loras_presets) + [(get_new_preset_msg(advanced_ui), "")]
                 with gr.Column(scale=6):
@@ -8820,7 +8851,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
                 with gr.Column(visible= False) as current_gen_column:
                     with gr.Accordion("Preview", open=False):
-                        preview = gr.Image(label="Preview", height=200, show_label= False)
+                        preview = gr.HTML(label="Preview", show_label= False)
                         preview_trigger = gr.Text(visible= False)
                     gen_info = gr.HTML(visible=False, min_height=1) 
                     with gr.Row() as current_gen_buttons_row:
@@ -8944,9 +8975,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 outputs=[modal_html_display, modal_container],
                 show_progress="hidden"
             )
-            close_modal_button.click(
+            close_modal_trigger_btn.click(
                 fn=lambda: gr.Column(visible=False),
-                inputs=[],
                 outputs=[modal_container],
                 show_progress="hidden"
             )
@@ -10239,50 +10269,71 @@ def create_ui():
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.85);
+            z-index: 1000;
+            cursor: pointer;
+        }
+        #image-modal-container .modal-flex-container {
+            display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 1000;
-            padding: 20px;
-            box-sizing: border-box;
-        }
-        #image-modal-container {
-            position: fixed;
-            top: 0;
-            left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            padding: 20px;
+            padding: 2vh;
             box-sizing: border-box;
         }
-        #image-modal-container > div {
-             background-color: white;
-             padding: 15px;
-             border-radius: 8px;
-             max-width: 90%;
-             max-height: 90%;
-             overflow: auto;
-             position: relative;
-             display: flex;
-             flex-direction: column;
+        #image-modal-container .modal-content-wrapper {
+            position: relative;
+            background: #1f2937;
+            padding: 0;
+            border-radius: 8px;
+            cursor: default;
+            display: flex;
+            flex-direction: column;
+            max-width: 95vw;
+            max-height: 95vh;
+            overflow: hidden;
         }
-         #image-modal-container img {
-             max-width: 100%;
-             max-height: 80vh;
-             object-fit: contain;
-             margin-top: 10px;
-         }
-         #image-modal-close-button-row {
-             display: flex;
-             justify-content: flex-end;
-         }
-         #image-modal-close-button-row button {
+        #image-modal-container .modal-close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 50%;
+            color: #fff;
+            font-size: 1.8rem;
+            font-weight: bold;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             cursor: pointer;
-         }
+            line-height: 1;
+            z-index: 1002;
+            transition: background-color 0.2s, transform 0.2s;
+            text-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        #image-modal-container .modal-close-btn:hover {
+            background-color: rgba(0, 0, 0, 0.8);
+            transform: scale(1.1);
+        }
+        #image-modal-container .modal-label {
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            font-size: 14px;
+            border-radius: 4px;
+            z-index: 1001;
+        }
+        #image-modal-container .modal-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
         .progress-container-custom {
             width: 100%;
             background-color: #e9ecef;
@@ -10451,16 +10502,12 @@ def create_ui():
                 hiddenTextbox.value = action;
                 hiddenTextbox.dispatchEvent(new Event('input', { bubbles: true }));
                 hiddenButton.click();
-            } else {
-                console.error("Could not find hidden modal action elements.");
             }
         };
 
         window.closeImageModal = function() {
-            const modal = document.querySelector('#image-modal-container');
-            if (modal) {
-                modal.style.display = 'none';
-            }
+            const closeButton = document.querySelector('#modal_close_trigger_btn');
+            if (closeButton) closeButton.click();
         };
 
         let draggedItem = null;
