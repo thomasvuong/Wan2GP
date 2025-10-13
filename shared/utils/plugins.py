@@ -11,6 +11,15 @@ import subprocess
 import git
 import shutil
 
+SYSTEM_PLUGINS = [
+    "wan2gp-about",
+    "wan2gp-configuration",
+    "wan2gp-downloads",
+    "wan2gp-guides",
+    "wan2gp-plugin-manager",
+    "wan2gp-video-mask-creator",
+]
+
 @dataclass
 class InsertAfterRequest:
     target_component_id: str
@@ -88,7 +97,8 @@ class PluginManager:
         plugins_info = []
         for dir_name in self.discover_plugins():
             plugin_path = os.path.join(self.plugins_dir, dir_name)
-            info = {'id': dir_name, 'name': dir_name, 'version': 'N/A', 'description': 'No description provided.', 'path': plugin_path}
+            is_system = dir_name in SYSTEM_PLUGINS
+            info = {'id': dir_name, 'name': dir_name, 'version': 'N/A', 'description': 'No description provided.', 'path': plugin_path, 'system': is_system}
             try:
                 # Use import_module, which correctly handles packages and relative imports
                 module = importlib.import_module(f"{dir_name}.plugin")
@@ -102,12 +112,17 @@ class PluginManager:
             except Exception as e:
                 print(f"Could not load metadata for plugin {dir_name}: {e}")
             plugins_info.append(info)
+        
+        plugins_info.sort(key=lambda p: (not p['system'], p['name']))
         return plugins_info
 
     def uninstall_plugin(self, plugin_id: str):
         if not plugin_id:
             return "[Error] No plugin selected for uninstallation."
         
+        if plugin_id in SYSTEM_PLUGINS:
+            return f"[Error] Cannot uninstall system plugin '{plugin_id}'."
+
         target_dir = os.path.join(self.plugins_dir, plugin_id)
         if not os.path.isdir(target_dir):
             return f"[Error] Plugin '{plugin_id}' directory not found."
@@ -231,9 +246,11 @@ class PluginManager:
                 discovered.append(item)
         return sorted(discovered)
 
-    def load_plugins_from_directory(self, enabled_plugins: List[str]) -> None:
+    def load_plugins_from_directory(self, enabled_user_plugins: List[str]) -> None:
+        plugins_to_load = SYSTEM_PLUGINS + [p for p in enabled_user_plugins if p not in SYSTEM_PLUGINS]
+
         for plugin_dir_name in self.discover_plugins():
-            if plugin_dir_name not in enabled_plugins:
+            if plugin_dir_name not in plugins_to_load:
                 continue
             try:
                 module = importlib.import_module(f"{plugin_dir_name}.plugin")
@@ -355,27 +372,41 @@ class WAN2GPApplication:
         if not self.plugin_manager:
             return
         server_config = main_module_globals.get('server_config', {})
-        enabled_plugins = server_config.get("enabled_plugins", [])
-        self.plugin_manager.load_plugins_from_directory(enabled_plugins)
-        self.plugin_manager.inject_globals(main_module_globals)
-        plugin_ui = self.plugin_manager.setup_ui()
-        plugin_tabs = plugin_ui.get('tabs', {})
+        enabled_user_plugins = server_config.get("enabled_plugins", [])
         
-        sort_alphabetically = server_config.get("sort_plugins_alphabetically", False)
+        self.plugin_manager.load_plugins_from_directory(enabled_user_plugins)
+        self.plugin_manager.inject_globals(main_module_globals)
+        
+        loaded_plugins = self.plugin_manager.get_all_plugins()
 
-        if sort_alphabetically:
-            sorted_plugin_tabs = sorted(
-                plugin_tabs.items(),
-                key=lambda item: item[1]['label']
-            )
-        else:
-            sorted_plugin_tabs = sorted(
-                plugin_tabs.items(),
-                key=lambda item: (item[1].get('position', -1), item[1]['label'])
-            )
+        system_tabs = []
+        user_tabs = []
 
-        for tab_id, tab_info in sorted_plugin_tabs:
-            with gr.Tab(tab_info['label'], id=f"plugin_{tab_id}"):
+        for plugin_id, plugin in loaded_plugins.items():
+            for tab_id, tab in plugin.tabs.items():
+                tab_info = {
+                    'id': tab_id,
+                    'label': tab.label,
+                    'component_constructor': tab.component_constructor,
+                    'position': tab.position
+                }
+                if plugin_id in SYSTEM_PLUGINS:
+                    system_tabs.append(tab_info)
+                else:
+                    user_tabs.append((plugin_id, tab_info))
+
+        system_tabs.sort(key=lambda t: (t.get('position', -1), t['label']))
+        
+        sorted_user_tabs = []
+        for plugin_id in enabled_user_plugins:
+            for pid, tab_info in user_tabs:
+                if pid == plugin_id:
+                    sorted_user_tabs.append(tab_info)
+        
+        all_tabs_to_render = system_tabs + sorted_user_tabs
+        
+        for tab_info in all_tabs_to_render:
+            with gr.Tab(tab_info['label'], id=f"plugin_{tab_info['id']}"):
                 tab_info['component_constructor']()
 
     def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components: Dict[str, Any]):

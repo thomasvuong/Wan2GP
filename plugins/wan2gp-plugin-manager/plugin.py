@@ -9,7 +9,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
     def __init__(self):
         super().__init__()
         self.name = "Plugin Manager UI"
-        self.version = "1.4.3"
+        self.version = "1.5.0"
         self.description = "A built-in UI for managing, installing, and updating Wan2GP plugins"
 
     def setup_ui(self):
@@ -39,6 +39,57 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                     return false;
                 }
 
+                function makeSortable() {
+                    const userPluginList = document.querySelector('#user-plugin-list');
+                    if (!userPluginList) return;
+
+                    let draggedItem = null;
+
+                    userPluginList.addEventListener('dragstart', e => {
+                        draggedItem = e.target.closest('.plugin-item');
+                        if (!draggedItem) return;
+                        setTimeout(() => {
+                            if (draggedItem) draggedItem.style.opacity = '0.5';
+                        }, 0);
+                    });
+
+                    userPluginList.addEventListener('dragend', e => {
+                        setTimeout(() => {
+                             if (draggedItem) {
+                                draggedItem.style.opacity = '1';
+                                draggedItem = null;
+                             }
+                        }, 0);
+                    });
+
+                    userPluginList.addEventListener('dragover', e => {
+                        e.preventDefault();
+                        const afterElement = getDragAfterElement(userPluginList, e.clientY);
+                        if (draggedItem) {
+                            if (afterElement == null) {
+                                userPluginList.appendChild(draggedItem);
+                            } else {
+                                userPluginList.insertBefore(draggedItem, afterElement);
+                            }
+                        }
+                    });
+
+                    function getDragAfterElement(container, y) {
+                        const draggableElements = [...container.querySelectorAll('.plugin-item:not(.dragging)')];
+                        return draggableElements.reduce((closest, child) => {
+                            const box = child.getBoundingClientRect();
+                            const offset = y - box.top - box.height / 2;
+                            if (offset < 0 && offset > closest.offset) {
+                                return { offset: offset, element: child };
+                            } else {
+                                return closest;
+                            }
+                        }, { offset: Number.NEGATIVE_INFINITY }).element;
+                    }
+                }
+                
+                setTimeout(makeSortable, 500);
+
                 window.handlePluginAction = function(button, action) {
                     const pluginItem = button.closest('.plugin-item');
                     const pluginId = pluginItem.dataset.pluginId;
@@ -47,12 +98,15 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                 };
 
                 window.handleSave = function(restart) {
-                    const container = document.querySelector('.plugin-list');
-                    if (!container) return;
-                    const checkboxes = container.querySelectorAll('.plugin-enable-checkbox:checked');
-                    const enabledIds = Array.from(checkboxes).map(cb => cb.closest('.plugin-item').dataset.pluginId);
+                    const user_container = document.querySelector('#user-plugin-list');
+                    if (!user_container) return;
                     
-                    const payload = JSON.stringify({ restart: restart, enabled_plugins: enabledIds });
+                    const user_plugins = user_container.querySelectorAll('.plugin-item');
+                    const enabledUserPlugins = Array.from(user_plugins)
+                        .filter(item => item.querySelector('.plugin-enable-checkbox').checked)
+                        .map(item => item.dataset.pluginId);
+                    
+                    const payload = JSON.stringify({ restart: restart, enabled_plugins: enabledUserPlugins });
                     updateGradioInput('save_action_input', payload);
                 };
             }
@@ -61,26 +115,54 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
 
     def _build_plugins_html(self):
         plugins_info = self.app.plugin_manager.get_plugins_info()
-        enabled_plugins = self.server_config.get("enabled_plugins", [])
+        enabled_user_plugins = self.server_config.get("enabled_plugins", [])
         
         if not plugins_info:
             return "<p style='text-align:center; color: var(--text-color-secondary);'>No plugins found.</p>"
 
-        items_html = ""
-        for plugin in plugins_info:
+        system_plugins = [p for p in plugins_info if p.get('system')]
+        user_plugins_map = {p['id']: p for p in plugins_info if not p.get('system')}
+
+        user_plugins = []
+        for plugin_id in enabled_user_plugins:
+            if plugin_id in user_plugins_map:
+                user_plugins.append(user_plugins_map.pop(plugin_id))
+        user_plugins.extend(user_plugins_map.values())
+
+        system_items_html = ""
+        for plugin in system_plugins:
+            system_items_html += f"""
+            <div class="plugin-item" data-plugin-id="{plugin['id']}">
+                <div class="plugin-info-container">
+                    <input type="checkbox" class="plugin-enable-checkbox" checked disabled>
+                    <div class="plugin-item-info">
+                        <div class="plugin-header">
+                            <span class="name">{plugin['name']}</span>
+                            <span class="version">version {plugin['version']} (id: {plugin['id']})</span>
+                        </div>
+                        <span class="description">{plugin['description']}</span>
+                    </div>
+                </div>
+                 <div class="plugin-item-actions">
+                    <span class="system-plugin-tag">System Plugin</span>
+                </div>
+            </div>
+            """
+
+        user_items_html = ""
+        for plugin in user_plugins:
             plugin_id = plugin['id']
-            checked = "checked" if plugin_id in enabled_plugins else ""
-            description_text = plugin.get('description', 'No description provided.')
-            items_html += f"""
-            <div class="plugin-item" data-plugin-id="{plugin_id}">
+            checked = "checked" if plugin_id in enabled_user_plugins else ""
+            user_items_html += f"""
+            <div class="plugin-item" data-plugin-id="{plugin_id}" draggable="true">
                 <div class="plugin-info-container">
                     <input type="checkbox" class="plugin-enable-checkbox" {checked}>
                     <div class="plugin-item-info">
                         <div class="plugin-header">
                             <span class="name">{plugin['name']}</span>
-                            <span class="version">version {plugin['version']} (id: {plugin_id})</span>
+                            <span class="version">version {plugin['version']} (id: {plugin['id']})</span>
                         </div>
-                        <span class="description">{description_text}</span>
+                        <span class="description">{plugin.get('description', 'No description provided.')}</span>
                     </div>
                 </div>
                 <div class="plugin-item-actions">
@@ -96,6 +178,10 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             .plugin-list { display: flex; flex-direction: column; gap: 12px; }
             .plugin-item { display: flex; flex-wrap: column; gap: 12px; justify-content: space-between; align-items: center; padding: 16px; border: 1px solid var(--border-color-primary); border-radius: 12px; background-color: var(--background-fill-secondary); transition: box-shadow 0.2s ease-in-out; }
             .plugin-item:hover { box-shadow: var(--shadow-drop-lg); }
+            .plugin-item[draggable="true"] { cursor: grab; }
+            .plugin-item[draggable="true"]:active { cursor: grabbing; }
+            .plugin-section-header { margin-top: 20px; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; color: var(--text-color-primary); border-bottom: 1px solid var(--border-color-primary); padding-bottom: 5px; }
+            .system-plugin-tag { font-size: 0.9em; font-style: italic; color: var(--text-color-secondary); }
             .plugin-info-container { display: flex; align-items: center; gap: 16px; flex-grow: 1; }
             .plugin-item-info { display: flex; flex-direction: column; gap: 4px; }
             .plugin-item-info .name { font-weight: 600; font-size: 1.1em; color: var(--text-color-primary); font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif; }
@@ -108,18 +194,28 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             .plugin-enable-checkbox:hover { border-color: var(--color-accent); }
             .plugin-enable-checkbox:checked { background-color: var(--color-accent); border-color: var(--color-accent); }
             .plugin-enable-checkbox:checked::after { content: '✔'; position: absolute; color: white; font-size: 16px; font-weight: bold; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+            .plugin-enable-checkbox:disabled { cursor: not-allowed; border-color: var(--border-color-accent-subdued); background-color: var(--background-fill-primary-hover); }
+            .plugin-enable-checkbox:disabled:checked { background-color: var(--color-accent-soft); border-color: var(--color-accent-soft); }
             .save-buttons-container { justify-content: flex-start; margin-top: 20px !important; gap: 12px; }
             .stylish-save-btn { font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif !important; font-weight: 600 !important; font-size: 1.05em !important; padding: 10px 20px !important; }
         </style>
         """
 
-        return f"{css}<div class='plugin-list'>{items_html}</div>"
+        full_html = f"""
+        {css}
+        <div class="plugin-list">
+            <h3 class="plugin-section-header">System Plugins</h3>
+            <div id="system-plugin-list">{system_items_html}</div>
+            <h3 class="plugin-section-header">User Plugins (Drag to reorder tabs)</h3>
+            <div id="user-plugin-list">{user_items_html}</div>
+        </div>
+        """
+        return full_html
 
     def create_plugin_manager_ui(self):
         with gr.Blocks() as plugin_blocks:
             with gr.Row(equal_height=False, variant='panel'):
                 with gr.Column(scale=2, min_width=600):
-                    gr.Markdown("### Installed Plugins")
                     self.plugins_html_display = gr.HTML(self._build_plugins_html)
                     with gr.Row(elem_classes="save-buttons-container"):
                         self.save_plugins_button = gr.Button("Save", variant="secondary", size="sm", scale=0, elem_classes="stylish-save-btn")
@@ -208,6 +304,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                 gr.Info(result_message)
         except (json.JSONDecodeError, ValueError) as e:
             gr.Warning(f"Could not perform plugin action: {e}")
+            traceback.print_exc()
         return self._refresh_ui()
 
     def post_ui_setup(self, components: dict):

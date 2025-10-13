@@ -54,7 +54,7 @@ from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
-from shared.utils.plugins import PluginManager, WAN2GPApplication
+from shared.utils.plugins import PluginManager, WAN2GPApplication, SYSTEM_PLUGINS
 from collections import defaultdict
 
 # import torch._dynamo as dynamo
@@ -1830,8 +1830,6 @@ if not Path(server_config_filename).is_file():
         "profile" : profile_type.LowRAM_LowVRAM,
         "preload_model_policy": [],
         "UI_theme": "default",
-        "sort_plugins_alphabetically": False,
-        "enabled_plugins": ["wan2gp-gallery", "wan2gp-lora-multipliers-ui", "wan2gp-plugin-manager", "wan2gp-about", "wan2gp-downloads", "wan2gp-guides", "wan2gp-configuration", "wan2gp-video-mask-creator"],
         "checkpoints_paths": fl.default_checkpoints_paths,
     }
 
@@ -1841,8 +1839,6 @@ else:
     with open(server_config_filename, "r", encoding="utf-8") as reader:
         text = reader.read()
     server_config = json.loads(text)
-    if "enabled_plugins" not in server_config:
-        server_config["enabled_plugins"] = ["wan2gp-gallery", "wan2gp-lora-multipliers-ui", "wan2gp-plugin-manager", "wan2gp-about", "wan2gp-downloads", "wan2gp-guides", "wan2gp-configuration", "wan2gp-video-mask-creator"]
 
 checkpoints_paths = server_config.get("checkpoints_paths", None)
 if checkpoints_paths is None: checkpoints_paths = server_config["checkpoints_paths"] = fl.default_checkpoints_paths
