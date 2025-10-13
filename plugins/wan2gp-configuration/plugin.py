@@ -42,7 +42,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
             tab_id="configuration",
             label="Configuration",
             component_constructor=self.create_config_ui,
-            position=2
+            position=4
         )
 
     def create_config_ui(self):

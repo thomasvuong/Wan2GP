@@ -22,7 +22,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             tab_id="plugin_manager_tab",
             label="Plugins",
             component_constructor=self.create_plugin_manager_ui,
-            position=3
+            position=6
         )
 
     def _get_js_script_html(self):
