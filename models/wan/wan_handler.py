@@ -190,6 +190,7 @@ class family_handler():
                            ("Video to Video guided by Text Prompt", "GUV"),
                            ("Video to Video guided by Text Prompt and Restricted to the Area of the Video Mask", "GVA")],
                 "default": "",
+                "show_label" : False,
                 "letters_filter": "GUVA",
                 "label": "Video to Video"
             }
@@ -395,7 +396,7 @@ class family_handler():
                     "visible" : False,
                 }
 
-        if vace_class or base_model_type in ["animate"]:
+        if vace_class or base_model_type in ["animate", "t2v", "t2v_2_2"] :
             image_prompt_types_allowed = "TVL"
         elif base_model_type in ["infinitetalk"]:
             image_prompt_types_allowed = "TSVL"
