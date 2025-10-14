@@ -11,7 +11,16 @@ def render_video(tensor_fgr,
                 nrow=8,
                 normalize=True,
                 value_range=(-1, 1)):
-    
+    def to_tensor(arr_list):
+        tensor_list= [torch.from_numpy(arr).float().div_(127.5).sub_(1) for arr in arr_list]
+        tensor_list = torch.stack(tensor_list, dim = 0).permute(3,0,1,2).unsqueeze(0)
+        return tensor_list
+                
+    if not torch.is_tensor(tensor_fgr):
+        tensor_fgr = to_tensor(tensor_fgr)
+    if not torch.is_tensor(tensor_pha):
+        tensor_pha = to_tensor(tensor_pha)
+
     tensor_fgr = tensor_fgr.clamp(min(value_range), max(value_range))
     tensor_fgr = torch.stack([
         torchvision.utils.make_grid(
@@ -34,7 +43,10 @@ def render_video(tensor_fgr,
     frames_fgr = []
     frames_pha = []
     for frame_fgr, frame_pha in zip(tensor_fgr.numpy(), tensor_pha.numpy()):
-        frame_pha = (0.0 + frame_pha[:,:,0:1] + frame_pha[:,:,1:2] + frame_pha[:,:,2:3]) / 3.
+        if frame_pha.shape[-1] == 1:
+            frame_pha = frame_pha[:,:,0]
+        else:
+            frame_pha = (0.0 + frame_pha[:,:,0:1] + frame_pha[:,:,1:2] + frame_pha[:,:,2:3]) / 3.
         frame = np.concatenate([frame_fgr[:,:,::-1], frame_pha.astype(np.uint8)], axis=2)
         frames.append(frame)
         frames_fgr.append(frame_fgr)
@@ -69,6 +81,7 @@ def from_BRGA_numpy_to_RGBA_torch(video):
     return video
 
 def write_zip_file(zip_path, frames):
+    # frames in BGRA format
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for idx, img in enumerate(frames):
             success, buffer = cv2.imencode(".png", img)
