@@ -93,16 +93,12 @@ class ConfigTabPlugin(WAN2GPPlugin):
                         ],
                         value=self.attention_mode, label="Attention Type", interactive=not self.args.lock_config
                     )
-                    self.metadata_choice = gr.Dropdown(
-                        choices=[("Export JSON files", "json"), ("Embed metadata in file (Exif/tag)", "metadata"), ("None", "none")],
-                        value=self.server_config.get("metadata_type", "metadata"), label="Metadata Handling"
-                    )
                     self.preload_model_policy_choice = gr.CheckboxGroup(
                         [("Preload Model on App Launch","P"), ("Preload Model on Switch", "S"), ("Unload Model when Queue is Done", "U")],
                         value=self.preload_model_policy, label="Model Loading/Unloading Policy"
                     )
                     self.clear_file_list_choice = gr.Dropdown(
-                        choices=[("None", 0), ("Keep last video", 1), ("Keep last 5 videos", 5), ("Keep last 10", 10), ("Keep last 20", 20)],
+                        choices=[("None", 0), ("Keep last video", 1), ("Keep last 5 videos", 5), ("Keep last 10", 10), ("Keep last 20", 20), ("Keep last 30", 30)],
                         value=self.server_config.get("clear_file_list", 5), label="Keep Previous Generations in Gallery"
                     )
                     self.display_stats_choice = gr.Dropdown(
@@ -110,7 +106,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
                         value=self.server_config.get("display_stats", 0), label="Display real-time RAM/VRAM stats (requires restart)"
                     )
                     self.max_frames_multiplier_choice = gr.Dropdown(
-                        choices=[("Default", 1), ("x2", 2), ("x3", 3), ("x4", 4), ("x5", 5)],
+                        choices=[("Default", 1), ("x2", 2), ("x3", 3), ("x4", 4), ("x5", 5), ("x6", 6), ("x7", 7)],
                         value=self.server_config.get("max_frames_multiplier", 1), label="Max Frames Multiplier (requires restart)"
                     )
                     default_paths = self.fl.default_checkpoints_paths
@@ -124,6 +120,14 @@ class ConfigTabPlugin(WAN2GPPlugin):
                     self.UI_theme_choice = gr.Dropdown(
                         choices=[("Blue Sky (Default)", "default"), ("Classic Gradio", "gradio")],
                         value=self.server_config.get("UI_theme", "default"), label="UI Theme (requires restart)"
+                    )
+                    self.queue_color_scheme_choice = gr.Dropdown(
+                        choices=[
+                            ("Pastel (Unique color for each item)", "pastel"),
+                            ("Alternating Grey Shades", "alternating_grey"),
+                        ],
+                        value=self.server_config.get("queue_color_scheme", "pastel"),
+                        label="Queue Color Scheme"
                     )
 
                 with gr.Tab("Performance"):
@@ -149,6 +153,15 @@ class ConfigTabPlugin(WAN2GPPlugin):
                     self.video_output_codec_choice = gr.Dropdown(choices=[("x265 CRF 28 (Balanced)", 'libx265_28'), ("x264 Level 8 (Balanced)", 'libx264_8'), ("x265 CRF 8 (High Quality)", 'libx265_8'), ("x264 Level 10 (High Quality)", 'libx264_10'), ("x264 Lossless", 'libx264_lossless')], value=self.server_config.get("video_output_codec", "libx264_8"), label="Video Codec")
                     self.image_output_codec_choice = gr.Dropdown(choices=[("JPEG Q85", 'jpeg_85'), ("WEBP Q85", 'webp_85'), ("JPEG Q95", 'jpeg_95'), ("WEBP Q95", 'webp_95'), ("WEBP Lossless", 'webp_lossless'), ("PNG Lossless", 'png')], value=self.server_config.get("image_output_codec", "jpeg_95"), label="Image Codec")
                     self.audio_output_codec_choice = gr.Dropdown(choices=[("AAC 128 kbit", 'aac_128')], value=self.server_config.get("audio_output_codec", "aac_128"), visible=False, label="Audio Codec to use")
+                    self.metadata_choice = gr.Dropdown(
+                        choices=[("Export JSON files", "json"), ("Embed metadata in file (Exif/tag)", "metadata"), ("None", "none")],
+                        value=self.server_config.get("metadata_type", "metadata"), label="Metadata Handling"
+                    )
+                    self.embed_source_images_choice = gr.Checkbox(
+                        value=self.server_config.get("embed_source_images", False),
+                        label="Embed Source Images",
+                        info="Saves i2v source images inside MP4 files"
+                    )
                     self.video_save_path_choice = gr.Textbox(label="Video Output Folder (requires restart)", value=self.save_path)
                     self.image_save_path_choice = gr.Textbox(label="Image Output Folder (requires restart)", value=self.image_save_path)
 
@@ -166,15 +179,22 @@ class ConfigTabPlugin(WAN2GPPlugin):
         if self.args.lock_config:
             return "<div style='color:red; text-align:center;'>Configuration is locked by command-line arguments.</div>"
         
-        (transformer_types_choices, transformer_dtype_policy_choice, text_encoder_quantization_choice,
-         VAE_precision_choice, mixed_precision_choice, save_path_choice, image_save_path_choice,
-         attention_choice, compile_choice, profile_choice, vae_config_choice, metadata_choice,
-         quantization_choice, boost_choice, clear_file_list_choice, preload_model_policy_choice,
-         UI_theme_choice, enhancer_enabled_choice, enhancer_mode_choice, mmaudio_enabled_choice,
-         fit_canvas_choice, preload_in_VRAM_choice, depth_anything_v2_variant_choice,
-         notification_sound_enabled_choice, notification_sound_volume_choice, max_frames_multiplier_choice,
-         display_stats_choice, video_output_codec_choice, image_output_codec_choice, audio_output_codec_choice,
-         model_hierarchy_type_choice, checkpoints_paths_choice, last_resolution_choice) = args
+        (
+            transformer_types_choices, model_hierarchy_type_choice, fit_canvas_choice,
+            attention_choice, preload_model_policy_choice, clear_file_list_choice,
+            display_stats_choice, max_frames_multiplier_choice, checkpoints_paths_choice,
+            UI_theme_choice, queue_color_scheme_choice,
+            quantization_choice, transformer_dtype_policy_choice, mixed_precision_choice,
+            text_encoder_quantization_choice, VAE_precision_choice, compile_choice,
+            depth_anything_v2_variant_choice, vae_config_choice, boost_choice,
+            profile_choice, preload_in_VRAM_choice,
+            enhancer_enabled_choice, enhancer_mode_choice, mmaudio_enabled_choice,
+            video_output_codec_choice, image_output_codec_choice, audio_output_codec_choice,
+            metadata_choice, embed_source_images_choice,
+            save_path_choice, image_save_path_choice,
+            notification_sound_enabled_choice, notification_sound_volume_choice,
+            last_resolution_choice
+        ) = args
 
         if len(checkpoints_paths_choice.strip()) == 0:
             checkpoints_paths = self.fl.default_checkpoints_paths
@@ -203,6 +223,8 @@ class ConfigTabPlugin(WAN2GPPlugin):
             "audio_output_codec": audio_output_codec_choice,
             "model_hierarchy_type": model_hierarchy_type_choice,
             "checkpoints_paths": checkpoints_paths,
+            "queue_color_scheme": queue_color_scheme_choice,
+            "embed_source_images": embed_source_images_choice,
             "last_model_type": state["model_type"],
             "last_model_per_family": state["last_model_per_family"],
             "last_model_per_type": state["last_model_per_type"],
@@ -234,16 +256,21 @@ class ConfigTabPlugin(WAN2GPPlugin):
         resolution = components['resolution']
 
         inputs = [
-            state, self.transformer_types_choices, self.transformer_dtype_policy_choice,
-            self.text_encoder_quantization_choice, self.VAE_precision_choice, self.mixed_precision_choice,
-            self.video_save_path_choice, self.image_save_path_choice, self.attention_choice, self.compile_choice,
-            self.profile_choice, self.vae_config_choice, self.metadata_choice, self.quantization_choice,
-            self.boost_choice, self.clear_file_list_choice, self.preload_model_policy_choice, self.UI_theme_choice,
-            self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice, self.fit_canvas_choice,
-            self.preload_in_VRAM_choice, self.depth_anything_v2_variant_choice, self.notification_sound_enabled_choice,
-            self.notification_sound_volume_choice, self.max_frames_multiplier_choice, self.display_stats_choice,
-            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice, 
-            self.model_hierarchy_type_choice, self.checkpoints_paths_choice, resolution
+            state,
+            self.transformer_types_choices, self.model_hierarchy_type_choice, self.fit_canvas_choice,
+            self.attention_choice, self.preload_model_policy_choice, self.clear_file_list_choice,
+            self.display_stats_choice, self.max_frames_multiplier_choice, self.checkpoints_paths_choice,
+            self.UI_theme_choice, self.queue_color_scheme_choice,
+            self.quantization_choice, self.transformer_dtype_policy_choice, self.mixed_precision_choice,
+            self.text_encoder_quantization_choice, self.VAE_precision_choice, self.compile_choice,
+            self.depth_anything_v2_variant_choice, self.vae_config_choice, self.boost_choice,
+            self.profile_choice, self.preload_in_VRAM_choice,
+            self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice,
+            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice,
+            self.metadata_choice, self.embed_source_images_choice,
+            self.video_save_path_choice, self.image_save_path_choice,
+            self.notification_sound_enabled_choice, self.notification_sound_volume_choice,
+            resolution
         ]
 
         self.apply_btn.click(
