@@ -55,10 +55,10 @@ import glob
 import cv2
 from transformers.utils import logging
 logging.set_verbosity_error
-from preprocessing.matanyone  import app as matanyone_app
 from tqdm import tqdm
 import requests
 from shared.gradio.gallery import AdvancedMediaGallery
+from shared.utils.plugins import PluginManager, WAN2GPApplication, SYSTEM_PLUGINS
 from collections import defaultdict
 
 # import torch._dynamo as dynamo
@@ -83,7 +83,6 @@ if mmgp_version != target_mmgp_version:
 lock = threading.Lock()
 current_task_id = None
 task_id = 0
-vmc_event_handler = matanyone_app.get_vmc_event_handler()
 unique_id = 0
 unique_id_lock = threading.Lock()
 offloadobj = enhancer_offloadobj = wan_model = None
@@ -920,11 +919,13 @@ def add_video_task(**inputs):
     item_color = get_queue_item_color(current_task_id)
 
     start_image_data, end_image_data, start_image_labels, end_image_labels = get_preview_images(inputs)
-
+    plugin_data = inputs.pop('plugin_data', {})
+    
     queue.append({
         "id": current_task_id,
         "color": item_color,
         "params": inputs.copy(),
+        "plugin_data": plugin_data,
         "repeats": inputs.get("repeat_generation",1),
         "length": inputs.get("video_length",0) or 0, 
         "steps": inputs.get("num_inference_steps",0) or 0,
@@ -3281,149 +3282,6 @@ def release_RAM():
         release_model()
         gr.Info("Models stored in RAM have been released")
 
-def apply_changes(  state,
-                    transformer_types_choices,
-                    model_hierarchy_type_choice,
-                    transformer_dtype_policy_choice,
-                    text_encoder_quantization_choice,
-                    VAE_precision_choice,
-                    mixed_precision_choice,
-                    save_path_choice,
-                    image_save_path_choice,
-                    attention_choice,
-                    compile_choice,
-                    profile_choice,
-                    vae_config_choice,
-                    metadata_choice,
-                    quantization_choice,
-                    boost_choice = 1,
-                    clear_file_list = 0,
-                    preload_model_policy_choice = 1,
-                    UI_theme_choice = "default",
-                    enhancer_enabled_choice = 0,
-                    enhancer_mode_choice = 0,
-                    mmaudio_enabled_choice = 0,
-                    fit_canvas_choice = 0,
-                    preload_in_VRAM_choice = 0,
-                    depth_anything_v2_variant_choice = "vitl",
-                    notification_sound_enabled_choice = 0,
-                    notification_sound_volume_choice = 50,
-                    max_frames_multiplier_choice = 1,
-                    display_stats_choice = 0,
-                    video_output_codec_choice = None,
-                    embed_source_images_choice = None,
-                    image_output_codec_choice = None,
-                    audio_output_codec_choice = None,
-                    last_resolution_choice = None,
-                    checkpoints_paths = "",
-					queue_color_scheme_choice = "pastel",
-):
-    checkpoints_paths = fl.default_checkpoints_paths if len(checkpoints_paths.strip()) == "" else checkpoints_paths.replace("\r", "").split("\n")
-    checkpoints_paths = [path.strip() for path in checkpoints_paths if len(path.strip()) > 0 ]
-    fl.set_checkpoints_paths(checkpoints_paths)
-    if args.lock_config:
-        return "<DIV ALIGN=CENTER>Config Locked</DIV>",*[gr.update()]*5
-    if gen_in_progress:
-        return "<DIV ALIGN=CENTER>Unable to change config when a generation is in progress</DIV>",*[gr.update()]*5
-    global offloadobj, wan_model, server_config, loras, default_loras_choices, default_loras_multis_str, default_lora_preset_prompt, default_lora_preset, loras_presets
-    server_config = {
-        "attention_mode" : attention_choice,  
-        "transformer_types": transformer_types_choices, 
-        "model_hierarchy_type": model_hierarchy_type_choice,
-        "text_encoder_quantization" : text_encoder_quantization_choice,
-        "save_path" : save_path_choice,
-        "image_save_path" : image_save_path_choice,
-        "compile" : compile_choice,
-        "profile" : profile_choice,
-        "vae_config" : vae_config_choice,
-        "vae_precision" : VAE_precision_choice,
-        "mixed_precision" : mixed_precision_choice,
-        "metadata_type": metadata_choice,
-        "transformer_quantization" : quantization_choice,
-        "transformer_dtype_policy" : transformer_dtype_policy_choice,
-        "boost" : boost_choice,
-        "clear_file_list" : clear_file_list,
-        "preload_model_policy" : preload_model_policy_choice,
-        "UI_theme" : UI_theme_choice,
-        "fit_canvas": fit_canvas_choice,
-        "enhancer_enabled" : enhancer_enabled_choice,
-        "enhancer_mode" : enhancer_mode_choice,
-        "mmaudio_enabled" : mmaudio_enabled_choice,
-        "preload_in_VRAM" : preload_in_VRAM_choice,
-        "depth_anything_v2_variant": depth_anything_v2_variant_choice,
-        "notification_sound_enabled" : notification_sound_enabled_choice,
-        "notification_sound_volume" : notification_sound_volume_choice,
-        "max_frames_multiplier" : max_frames_multiplier_choice,
-        "display_stats" : display_stats_choice,
-        "video_output_codec" : video_output_codec_choice,
-        "video_container" : "mp4",  # Fixed to MP4 format
-        "embed_source_images" : embed_source_images_choice,
-        "image_output_codec" : image_output_codec_choice,
-        "audio_output_codec" : audio_output_codec_choice,
-        "last_model_type" : state["model_type"],
-        "last_model_per_family":  state["last_model_per_family"],
-        "last_model_per_type":  state["last_model_per_type"],
-        "last_advanced_choice": state["advanced"], 
-        "last_resolution_choice": last_resolution_choice, 
-        "last_resolution_per_group":  state["last_resolution_per_group"],
-        "checkpoints_paths": checkpoints_paths,
-		"queue_color_scheme": queue_color_scheme_choice,
-    }
-
-    if Path(server_config_filename).is_file():
-        with open(server_config_filename, "r", encoding="utf-8") as reader:
-            text = reader.read()
-        old_server_config = json.loads(text)
-        if lock_ui_attention:
-            server_config["attention_mode"] = old_server_config["attention_mode"]
-        if lock_ui_compile:
-            server_config["compile"] = old_server_config["compile"]
-
-    with open(server_config_filename, "w", encoding="utf-8") as writer:
-        writer.write(json.dumps(server_config, indent=4))
-
-    changes = []
-    for k, v in server_config.items():
-        v_old = old_server_config.get(k, None)
-        if v != v_old:
-            changes.append(k)
-
-    global attention_mode, default_profile, compile, vae_config, boost, lora_dir, reload_needed, preload_model_policy, transformer_quantization, transformer_dtype_policy, transformer_types, text_encoder_quantization, save_path , three_levels_hierarchy
-    three_levels_hierarchy= server_config["model_hierarchy_type"] == 1 
-    attention_mode = server_config["attention_mode"]
-    default_profile = server_config["profile"]
-    compile = server_config["compile"]
-    text_encoder_quantization = server_config["text_encoder_quantization"]
-    vae_config = server_config["vae_config"]
-    boost = server_config["boost"]
-    save_path = server_config["save_path"]
-    image_save_path = server_config["image_save_path"]
-    preload_model_policy = server_config["preload_model_policy"]
-    transformer_quantization = server_config["transformer_quantization"]
-    transformer_dtype_policy = server_config["transformer_dtype_policy"]
-    text_encoder_quantization = server_config["text_encoder_quantization"]
-    transformer_types = server_config["transformer_types"]    
-    model_type = state["model_type"]
-    model_filename = get_model_filename(model_type, transformer_quantization, transformer_dtype_policy)
-    state["model_filename"] = model_filename
-    if "enhancer_enabled" in changes or "enhancer_mode" in changes:
-        reset_prompt_enhancer()
-    if all(change in ["attention_mode", "vae_config", "boost", "save_path", "metadata_type", "clear_file_list", "fit_canvas", "depth_anything_v2_variant", 
-                      "notification_sound_enabled", "notification_sound_volume", "mmaudio_enabled", "max_frames_multiplier", "display_stats",
-                      "video_output_codec", "video_container", "embed_source_images", "image_output_codec", "audio_output_codec", "checkpoints_paths", "model_hierarchy_type", "queue_color_scheme"] for change in changes ):
-        model_family = gr.Dropdown()
-        model_base_type = gr.Dropdown()
-        model_choice = gr.Dropdown()
-        if "model_hierarchy_type" in changes:
-            model_family, model_base_type, model_choice = generate_dropdown_model_list(model_type)
-    else:
-        reload_needed = True
-        model_family, model_base_type, model_choice = generate_dropdown_model_list(model_type)
-
-    header = generate_header(state["model_type"], compile=compile, attention_mode= attention_mode)
-    mmaudio_enabled = server_config["mmaudio_enabled"] > 0
-    return "<DIV ALIGN=CENTER>The new configuration has been succesfully applied</DIV>", header, model_family, model_base_type, model_choice, get_unique_id()
-
 def get_gen_info(state):
     cache = state.get("gen", None)
     if cache == None:
@@ -4854,6 +4712,7 @@ def generate_video(
     model_type,
     model_filename,
     mode,
+    plugin_data=None,
 ):
 
 
@@ -5946,7 +5805,8 @@ def process_tasks(state):
                     for arg_name in expected_args:
                         if arg_name not in params and arg_name in default_settings:
                             params[arg_name] = default_settings[arg_name]
-                generate_video(task, send_cmd,  **params)
+                plugin_data = task.pop('plugin_data', {})
+                generate_video(task, send_cmd, plugin_data=plugin_data,  **params)
             except Exception as e:
                 tb = traceback.format_exc().split('\n')[:-1] 
                 print('\n'.join(tb))
@@ -6668,6 +6528,13 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
 
     if target == "metadata":
         inputs = {k: v for k,v in inputs.items() if v != None  }
+        if hasattr(app, 'plugin_manager'):
+            inputs = app.plugin_manager.run_data_hooks(
+                'before_metadata_save',
+                configs=inputs,
+                plugin_data=inputs.pop('plugin_data', {}),
+                model_type=model_type
+            )
 
     return inputs
 
@@ -7179,6 +7046,7 @@ def save_inputs(
             override_profile,
             mode,
             state,
+            plugin_data,
 ):
 
 
@@ -7203,33 +7071,6 @@ def save_inputs(
         gr.Info("New Default Settings saved")
     elif target == "state":
         set_model_settings(state, model_type, cleaned_inputs)        
-
-def download_loras():
-    from huggingface_hub import  snapshot_download    
-    yield gr.Row(visible=True), "<B><FONT SIZE=3>Please wait while the Loras are being downloaded</B></FONT>" #, *[gr.Column(visible=False)] * 2
-    lora_dir = get_lora_dir("i2v")
-    log_path = os.path.join(lora_dir, "log.txt")
-    if not os.path.isfile(log_path):
-        tmp_path = os.path.join(lora_dir, "tmp_lora_dowload")
-        import glob
-        snapshot_download(repo_id="DeepBeepMeep/Wan2.1",  allow_patterns="loras_i2v/*", local_dir= tmp_path)
-        for f in glob.glob(os.path.join(tmp_path, "loras_i2v", "*.*")):
-            target_file = os.path.join(lora_dir,  Path(f).parts[-1] )
-            if os.path.isfile(target_file):
-                os.remove(f)
-            else:
-                shutil.move(f, lora_dir) 
-    try:
-        os.remove(tmp_path)
-    except:
-        pass
-    yield gr.Row(visible=True), "<B><FONT SIZE=3>Loras have been completely downloaded</B></FONT>" #, *[gr.Column(visible=True)] * 2
-
-    from datetime import datetime
-    dt = datetime.today().strftime('%Y-%m-%d')
-    with open( log_path, "w", encoding="utf-8") as writer:
-        writer.write(f"Loras downloaded on the {dt} at {time.time()} on the {time.time()}")
-    return
 
 
 def handle_queue_action(state, action_string):
@@ -7872,6 +7713,7 @@ def download_lora(state, lora_url, progress=gr.Progress(track_tqdm=True),):
 
 def generate_video_tab(update_form = False, state_dict = None, ui_defaults = None, model_family = None, model_base_type_choice = None, model_choice = None, header = None, main = None, main_tabs= None, tab_id='generate'):
     global inputs_names #, advanced
+    plugin_data = gr.State({})
 
     if update_form:
         model_filename = state_dict["model_filename"]
@@ -7928,10 +7770,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         with gr.Column(**column_kwargs):
             with gr.Column(visible=False, elem_id="image-modal-container") as modal_container:
                 modal_html_display = gr.HTML()
-                # These two are for opening the modal with content
                 modal_action_input = gr.Text(elem_id="modal_action_input", visible=False)
                 modal_action_trigger = gr.Button(elem_id="modal_action_trigger", visible=False)
-                # This hidden button is our new trigger for closing the modal
                 close_modal_trigger_btn = gr.Button(elem_id="modal_close_trigger_btn", visible=False)
             with gr.Row(visible= True): #len(loras)>0) as presets_column:
                 lset_choices = compute_lset_choices(model_type, loras_presets) + [(get_new_preset_msg(advanced_ui), "")]
@@ -8902,7 +8742,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                                       min_frames_if_references_col, video_prompt_type_alignment, prompt_enhancer_btn, tab_inpaint, tab_t2v] + image_start_extra + image_end_extra + image_refs_extra #  presets_column,
         if update_form:
             locals_dict = locals()
-            gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict] + extra_inputs
+            gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict, plugin_data] + extra_inputs
             return gen_inputs
         else:
             target_state = gr.Text(value = "state", interactive= False, visible= False)
@@ -8994,9 +8834,9 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
             onemoresample_btn.click(fn=one_more_sample,inputs=[state], outputs= [state])
             onemorewindow_btn.click(fn=one_more_window,inputs=[state], outputs= [state])
 
-            inputs_names= list(inspect.signature(save_inputs).parameters)[1:-1]
+            inputs_names= list(inspect.signature(save_inputs).parameters)[1:-2]
             locals_dict = locals()
-            gen_inputs = [locals_dict[k] for k in inputs_names] + [state]
+            gen_inputs = [locals_dict[k] for k in inputs_names] + [state, plugin_data]
             save_settings_btn.click( fn=validate_wizard_prompt, inputs =[state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] , outputs= [prompt]).then(
                 save_inputs, inputs =[target_settings] + gen_inputs, outputs = [])
 
@@ -9329,459 +9169,11 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
     if tab_id == 'edit':
         locals_dict = locals()
         gen_inputs = [locals_dict[k] for k in inputs_names] + [state] + extra_inputs
-        return gen_inputs
+        return gen_inputs, locals()
     else:
-        return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger,
+        return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, locals(),
                 #  video_guide, image_guide, video_mask, image_mask, image_refs,   
-                ) 
- 
-
-def generate_download_tab(lset_name,loras_choices, state):
-    with gr.Row():
-        with gr.Row(scale =2):
-            gr.Markdown("<I>WanGP's Lora Festival ! Press the following button to download i2v <B>Remade_AI</B> Loras collection (and bonuses Loras).")
-        with gr.Row(scale =1):
-            download_loras_btn = gr.Button("---> Let the Lora's Festival Start !", scale =1)
-        with gr.Row(scale =1):
-            gr.Markdown("")
-    with gr.Row() as download_status_row: 
-        download_status = gr.Markdown()
-
-    download_loras_btn.click(fn=download_loras, inputs=[], outputs=[download_status_row, download_status]).then(fn=refresh_lora_list, inputs=[state, lset_name,loras_choices], outputs=[lset_name, loras_choices])
-
-    
-def generate_configuration_tab(state, blocks, header, model_family, model_base_type_choice, model_choice, resolution, refresh_form_trigger):
-    gr.Markdown("Please click Apply Changes at the bottom so that the changes are effective. Some choices below may be locked if the app has been launched by specifying a config preset.")
-    with gr.Column():
-        with gr.Tabs():
-            # with gr.Row(visible=advanced_ui) as advanced_row:
-            with gr.Tab("General"):
-                _, _, dropdown_choices = get_sorted_dropdown(displayed_model_types, None, None, False)
-
-                transformer_types_choices = gr.Dropdown(
-                    choices= dropdown_choices,
-                    value= transformer_types,
-                    label= "Selectable Generative Models (keep empty to get All of them)",
-                    scale= 2,
-                    multiselect= True
-                    )
-
-                model_hierarchy_type_choice = gr.Dropdown(
-                    choices=[
-                        ("Two Levels: Model Family > Models & Finetunes", 0),
-                        ("Three Levels: Model Family > Models > Finetunes", 1),
-                    ],
-                    value= server_config.get("model_hierarchy_type", 1),
-                    label= "Models Hierarchy In User Interface",
-                    visible=args.betatest, 
-                    scale= 2,
-                    )
-
-
-                fit_canvas_choice = gr.Dropdown(
-                    choices=[
-                        ("Dimensions correspond to the Pixels Budget (as the Prompt Image/Video will be Resized to match this pixels Budget, output video height or width may exceed the requested dimensions )", 0),
-                        ("Dimensions correspond to the Maximum Width and Height (as the Prompt Image/Video will be Resized to fit into these dimensions, the output video may be smaller)", 1),
-                        ("Dimensions correspond to the Output Width and Height (as the Prompt Image/Video will be Cropped to fit exactly these dimensions)", 2),
-                    ],
-                    value= server_config.get("fit_canvas", 0),
-                    label="Generated Video Dimensions when Prompt contains an Image or a Video",
-                    interactive= not lock_ui_attention
-                 )
-
-
-                def check(mode): 
-                    if not mode in attention_modes_installed:
-                        return " (NOT INSTALLED)"
-                    elif not mode in attention_modes_supported:
-                        return " (NOT SUPPORTED)"
-                    else:
-                        return ""
-                attention_choice = gr.Dropdown(
-                    choices=[
-                        ("Auto : pick sage2 > sage > sdpa depending on what is installed", "auto"),
-                        ("Scale Dot Product Attention: default, always available", "sdpa"),
-                        ("Flash" + check("flash")+ ": good quality - requires additional install (usually complex to set up on Windows without WSL)", "flash"),
-                        ("Xformers" + check("xformers")+ ": good quality - requires additional install (usually complex, may consume less VRAM to set up on Windows without WSL)", "xformers"),
-                        ("Sage" + check("sage")+ ": 30% faster but slightly worse quality - requires additional install (usually complex to set up on Windows without WSL)", "sage"),
-                        ("Sage2/2++" + check("sage2")+ ": 40% faster but slightly worse quality - requires additional install (usually complex to set up on Windows without WSL)", "sage2")]\
-                        + ([("Radial" + check("radial")+ ": x? faster but ? quality - requires Sparge & Sage 2 Attn (usually complex to set up on Windows without WSL)", "radial")] if args.betatest else [])\
-                        +  [("Sage3" + check("sage3")+ ": x2 faster but worse quality - requires additional install (usually complex to set up on Windows without WSL)", "sage3")],
-                    value= attention_mode,
-                    label="Attention Type",
-                    interactive= not lock_ui_attention
-                 )
-
-
-                preload_model_policy_choice = gr.CheckboxGroup([("Preload Model while Launching the App","P"), ("Preload Model while Switching Model", "S"), ("Unload Model when Queue is Done", "U")],
-                    value=server_config.get("preload_model_policy",[]),
-                    label="RAM Loading / Unloading Model Policy (in any case VRAM will be freed once the queue has been processed)"
                 )
-
-                clear_file_list_choice = gr.Dropdown(
-                    choices=[
-                        ("None", 0),
-                        ("Keep the last video", 1),
-                        ("Keep the last 5 videos", 5),
-                        ("Keep the last 10 videos", 10),
-                        ("Keep the last 20 videos", 20),
-                        ("Keep the last 30 videos", 30),
-                    ],
-                    value=server_config.get("clear_file_list", 5),
-                    label="Keep Previously Generated Videos when starting a new Generation Batch"
-                )
-
-                display_stats_choice = gr.Dropdown(
-                    choices=[
-                        ("Disabled", 0),
-                        ("Enabled", 1),
-                    ],
-                    value=server_config.get("display_stats", 0),
-                    label="Display in real time available RAM / VRAM and other stats (needs a restart)"
-                )
-
-                max_frames_multiplier_choice = gr.Dropdown(
-                    choices=[
-                        ("Default", 1),
-                        ("x2", 2),
-                        ("x3", 3),
-                        ("x4", 4),
-                        ("x5", 5),
-                        ("x6", 7),
-                        ("x7", 7),
-                    ],
-                    value=server_config.get("max_frames_multiplier", 1),
-                    label="Increase the Max Number of Frames (needs more RAM and VRAM, usually the longer the worse the quality, needs an App restart)"
-                )
-                checkpoints_paths_text = "\n".join(server_config.get("checkpoints_paths", fl.default_checkpoints_paths))
-                checkpoints_paths = gr.Text(label ="Folders where Model Checkpoints are Stored. One Path per Line. First Path is Default Download Path.", value=checkpoints_paths_text,lines=3)
-
-                UI_theme_choice = gr.Dropdown(
-                    choices=[
-                        ("Blue Sky", "default"),
-                        ("Classic Gradio", "gradio"),
-                    ],
-                    value=server_config.get("UI_theme", "default"),
-                    label="User Interface Theme. You will need to restart the App the see new Theme."
-                )
-                queue_color_scheme_choice = gr.Dropdown(
-                    choices=[
-                        ("Pastel (Unique color for each item)", "pastel"),
-                        ("Alternating Grey Shades", "alternating_grey"),
-                    ],
-                    value=server_config.get("queue_color_scheme", "pastel"),
-                    label="Queue Color Scheme"
-                )
-
-            with gr.Tab("Performance"):
-
-                quantization_choice = gr.Dropdown(
-                    choices=[
-                        ("Scaled Int8 Quantization (recommended)", "int8"),
-                        ("16 bits (no quantization)", "bf16"),
-                    ],
-                    value= transformer_quantization,
-                    label="Transformer Model Quantization Type (if available)",
-                )                
-
-                transformer_dtype_policy_choice = gr.Dropdown(
-                    choices=[
-                        ("Best Supported Data Type by Hardware", ""),
-                        ("FP16", "fp16"),
-                        ("BF16", "bf16"),
-                    ],
-                    value= server_config.get("transformer_dtype_policy", ""),
-                    label="Transformer Data Type (if available)"
-                )
-
-                mixed_precision_choice = gr.Dropdown(
-                    choices=[
-                        ("16 bits only, requires less VRAM", "0"),
-                        ("Mixed 16 / 32 bits, slightly more VRAM needed but better Quality mainly for 1.3B models", "1"),
-                    ],
-                    value= server_config.get("mixed_precision", "0"),
-                    label="Transformer Engine Calculation"
-                )
-
-
-                text_encoder_quantization_choice = gr.Dropdown(
-                    choices=[
-                        ("16 bits - unquantized text encoder, better quality uses more RAM", "bf16"),
-                        ("8 bits - quantized text encoder, slightly worse quality but uses less RAM", "int8"),
-                    ],
-                    value= text_encoder_quantization,
-                    label="Text Encoder model"
-                )
-
-                VAE_precision_choice = gr.Dropdown(
-                    choices=[
-                        ("16 bits, requires less VRAM and faster", "16"),
-                        ("32 bits, requires twice more VRAM and slower but recommended with Window Sliding", "32"),
-                    ],
-                    value= server_config.get("vae_precision", "16"),
-                    label="VAE Encoding / Decoding precision"
-                )
-
-                gr.Text("Beware: when restarting the server or changing a resolution or video duration, the first step of generation for a duration / resolution may last a few minutes due to recompilation", interactive= False, show_label= False )
-                compile_choice = gr.Dropdown(
-                    choices=[
-                        ("On (requires to have Triton installed)", "transformer"),
-                        ("Off", "" ),
-                    ],
-                    value= compile,
-                    label="Compile Transformer : up to 10-20% faster, useful only if multiple gens at same frames no / resolution",
-                    interactive= not lock_ui_compile
-                )              
-
-                depth_anything_v2_variant_choice = gr.Dropdown(
-                    choices=[
-                        ("Large (more precise but 2x slower)", "vitl"),
-                        ("Big (less precise, less VRAM needed but faster)", "vitb"),
-                    ],
-                    value= server_config.get("depth_anything_v2_variant", "vitl"),
-                    label="Depth Anything v2 Vace Preprocessor Model type",
-                )              
-
-                vae_config_choice = gr.Dropdown(
-                    choices=[
-                ("Auto", 0),
-                ("Disabled (faster but may require up to 22 GB of VRAM)", 1),
-                ("256 x 256 : If at least 8 GB of VRAM", 2),
-                ("128 x 128 : If at least 6 GB of VRAM", 3),
-                    ],
-                    value= vae_config,
-                    label="VAE Tiling - reduce the high VRAM requirements for VAE decoding and VAE encoding (if enabled it will be slower)"
-                )
-
-                boost_choice = gr.Dropdown(
-                    choices=[
-                        # ("Auto (ON if Video longer than 5s)", 0),
-                        ("ON", 1), 
-                        ("OFF", 2), 
-                    ],
-                    value=boost,
-                    label="Boost: Give a 10% speedup without losing quality at the cost of a litle VRAM (up to 1GB at max frames and resolution)"
-                )
-
-                profile_choice = gr.Dropdown(
-                    choices = memory_profile_choices,
-                    value= default_profile,
-                    label="Profile (for power users only, not needed to change it)"
-                )
-                preload_in_VRAM_choice = gr.Slider(0, 40000, value=server_config.get("preload_in_VRAM", 0), step=100, label="Number of MB of Models that are Preloaded in VRAM (0 will use Profile default)")
-
-                release_RAM_btn  = gr.Button("Force Release RAM")
-                release_RAM_btn.click(fn=release_RAM)
-
-            with gr.Tab("Extensions"):
-                enhancer_enabled_choice = gr.Dropdown(
-                    choices=[
-                        ("Off", 0),
-                        ("Florence 2 1.6B + LLava 3.2 3.5B", 1),
-                        ("Florence 2 1.6B + LLama Joy Caption (uncensored but needs more VRAM) 9,3B", 2),
-                    ],
-                    value=server_config.get("enhancer_enabled", 0),
-                    label="Prompt Enhancer (if enabled, from 8 GB to 14 GB of extra models will be downloaded)"
-                )
-
-                enhancer_mode_choice = gr.Dropdown(
-                    choices=[
-                        ("Automatically triggered when Generating a Video", 0),
-                        ("On Demand Only", 1),
-                    ],
-                    value=server_config.get("enhancer_mode", 0),
-                    label="Prompt Enhancer Usage"
-                )
-
-                mmaudio_enabled_choice = gr.Dropdown(
-                    choices=[
-                        ("Off", 0),
-                        ("Turned On but unloaded from RAM after usage", 1),
-                        ("Turned On and kept in RAM for fast loading", 2),
-                    ],
-                    value=server_config.get("mmaudio_enabled", 0),
-                    label="MMAudio (if enabled, 10 GB of extra models will be downloaded)"
-                )
-
-            with gr.Tab("Outputs"):
-
-                video_output_codec_choice = gr.Dropdown(
-                    choices=[
-                        ("x265 Balanced Quality (CRF 28)", 'libx265_28'),
-                        ("x264 Balanced Quality (Level 8)", 'libx264_8'),
-                        ("x265 High Quality (CRF 8)", 'libx265_8'),
-                        ("x264 High Quality (Level 10)", 'libx264_10'),
-                        ("x264 Lossless", 'libx264_lossless'),
-                    ],
-                    value=server_config.get("video_output_codec", "libx264_8"),
-                    label="Video Codec to use"
-                )
-
-                image_output_codec_choice = gr.Dropdown(
-                    choices=[
-                        ("JPEG Quality 85", 'jpeg_85'),
-                        ("WEBP Quality 85", 'webp_85'),
-                        ("JPEG Quality 95", 'jpeg_95'),
-                        ("WEBP Quality 95", 'webp_95'),
-                        ("WEBP Lossless", 'webp_lossless'),
-                        ("PNG Lossless", 'png'),
-                    ],
-                    value=server_config.get("image_output_codec", "jpeg_95"),
-                    label="Image Codec to use"
-                )
-
-                audio_output_codec_choice = gr.Dropdown(
-                    choices=[
-                        ("AAC 128 kbit", 'aac_128'),
-                    ],
-                    value=server_config.get("audio_output_codec", "aac_128"),
-                    visible = False,
-                    label="Audio Codec to use"
-                )
-
-
-                metadata_choice = gr.Dropdown(
-                    choices=[
-                        ("Export JSON files", "json"),
-                        ("Embed metadata (Exif tag)", "metadata"),
-                        ("Neither", "none")
-                    ],
-                    value=server_config.get("metadata_type", "metadata"),
-                    label="Metadata Handling"
-                )
-
-                embed_source_images_choice = gr.Checkbox(
-                    value=server_config.get("embed_source_images", False),
-                    label="Embed Source Images",
-                    info="Saves i2v source images inside MP4 files"
-                )
-
-                video_save_path_choice = gr.Textbox(
-                    label="Output Folder for Generated Videos (need to restart app to be taken into account)",
-                    value=server_config.get("save_path", save_path)
-                )
-
-                image_save_path_choice = gr.Textbox(
-                    label="Output Folder for Generated Images (need to restart app to be taken into account)",
-                    value=server_config.get("image_save_path", image_save_path)
-                )
-
-
-            with gr.Tab("Notifications"):
-                gr.Markdown("### Notification Settings")
-                notification_sound_enabled_choice = gr.Dropdown(
-                    choices=[
-                        ("On", 1),
-                        ("Off", 0),
-                    ],
-                    value=server_config.get("notification_sound_enabled", 0),
-                    label="Notification Sound Enabled"
-                )
-
-                notification_sound_volume_choice = gr.Slider(
-                    minimum=0,
-                    maximum=100,
-                    value=server_config.get("notification_sound_volume", 50),
-                    step=5,
-                    label="Notification Sound Volume (0 = silent, 100 = very loud)"
-                )
-
-
-        
-        msg = gr.Markdown() 
-        apply_btn  = gr.Button("Apply Changes")
-        apply_btn.click(
-                fn=apply_changes,
-                inputs=[
-                    state,
-                    transformer_types_choices,
-                    model_hierarchy_type_choice,
-                    transformer_dtype_policy_choice,
-                    text_encoder_quantization_choice,
-                    VAE_precision_choice,
-                    mixed_precision_choice,
-                    video_save_path_choice,
-                    image_save_path_choice,
-                    attention_choice,
-                    compile_choice,                            
-                    profile_choice,
-                    vae_config_choice,
-                    metadata_choice,
-                    quantization_choice,
-                    boost_choice,
-                    clear_file_list_choice,
-                    preload_model_policy_choice,
-                    UI_theme_choice,
-                    enhancer_enabled_choice,
-                    enhancer_mode_choice,
-                    mmaudio_enabled_choice,
-                    fit_canvas_choice,
-                    preload_in_VRAM_choice,
-                    depth_anything_v2_variant_choice,
-                    notification_sound_enabled_choice,
-                    notification_sound_volume_choice,
-                    max_frames_multiplier_choice,
-                    display_stats_choice,
-                    video_output_codec_choice,
-                    embed_source_images_choice,
-                    image_output_codec_choice,
-                    audio_output_codec_choice,
-                    resolution,
-                    checkpoints_paths,
-					queue_color_scheme_choice,
-                ],
-                outputs= [msg , header, model_family, model_base_type_choice, model_choice, refresh_form_trigger]
-        )
-
-def generate_about_tab():
-    gr.Markdown("<H2>WanGP - AI Generative Models for the GPU Poor by <B>DeepBeepMeep</B> (<A HREF='https://github.com/deepbeepmeep/Wan2GP'>GitHub</A>)</H2>")
-    gr.Markdown("Many thanks to:")
-    gr.Markdown("- <B>Alibaba Wan Team</B> for the best open source video generators (https://github.com/Wan-Video/Wan2.1)")
-    gr.Markdown("- <B>Alibaba Vace, Multitalk and Fun Teams</B> for their incredible control net models (https://github.com/ali-vilab/VACE), (https://github.com/MeiGen-AI/MultiTalk) and  (https://huggingface.co/alibaba-pai/Wan2.2-Fun-A14B-InP) ")
-    gr.Markdown("- <B>Tencent</B> for the impressive Hunyuan Video models (https://github.com/Tencent-Hunyuan/HunyuanVideo)")
-    gr.Markdown("- <B>Blackforest Labs</B> for the innovative Flux image generators (https://github.com/black-forest-labs/flux)")
-    gr.Markdown("- <B>Alibaba Qwen Team</B> for their state of the art Qwen Image generators (https://github.com/QwenLM/Qwen-Image)")
-    gr.Markdown("- <B>Lightricks</B> for their super fast LTX Video models (https://github.com/Lightricks/LTX-Video)")
-    gr.Markdown("- <B>Hugging Face</B> for providing hosting for the models and developing must have open source libraries such as Tranformers, Diffusers, Accelerate and Gradio (https://huggingface.co/)")
-    gr.Markdown("<BR>Huge acknowledgments to these great open source projects used in WanGP:")
-    gr.Markdown("- <B>Rife</B>: temporal upsampler (https://github.com/hzwer/ECCV2022-RIFE)")
-    gr.Markdown("- <B>DwPose</B>: Open Pose extractor (https://github.com/IDEA-Research/DWPose)")
-    gr.Markdown("- <B>DepthAnything</B> & <B>Midas</B>: Depth extractors (https://github.com/DepthAnything/Depth-Anything-V2) and (https://github.com/isl-org/MiDaS")
-    gr.Markdown("- <B>Matanyone</B> and <B>SAM2</B>: Mask Generation (https://github.com/pq-yang/MatAnyone) and (https://github.com/facebookresearch/sam2)")
-    gr.Markdown("- <B>Pyannote</B>: speaker diarization (https://github.com/pyannote/pyannote-audio)")
-
-    gr.Markdown("<BR>Special thanks to the following people for their support:")
-    gr.Markdown("- <B>Cocktail Peanuts</B> : QA dpand simple installation via Pinokio.computer")
-    gr.Markdown("- <B>Tophness</B> : created (former) multi tabs and queuing frameworks")
-    gr.Markdown("- <B>AmericanPresidentJimmyCarter</B> : added original support for Skip Layer Guidance")
-    gr.Markdown("- <B>Remade_AI</B> : for their awesome Loras collection")
-    gr.Markdown("- <B>Reevoy24</B> : for his repackaging / completing the documentation")
-    gr.Markdown("- <B>Redtash1</B> : for designing the protype of the RAM / VRAM stats viewer")
-
-def generate_info_tab():
-
-
-    with open("docs/VACE.md", "r", encoding="utf-8") as reader:
-        vace= reader.read()
-
-    with open("docs/MODELS.md", "r", encoding="utf-8") as reader:
-        models = reader.read()
-
-    with open("docs/LORAS.md", "r", encoding="utf-8") as reader:
-        loras = reader.read()
-
-    with open("docs/FINETUNES.md", "r", encoding="utf-8") as reader:
-        finetunes = reader.read()
-
-    with gr.Tabs() :
-        with gr.Tab("Models", id="models"):
-            gr.Markdown(models)
-        with gr.Tab("Loras", id="loras"):
-            gr.Markdown(loras)
-        with gr.Tab("Vace", id="vace"):
-            gr.Markdown(vace)
-        with gr.Tab("Finetunes", id="finetunes"):
-            gr.Markdown(finetunes)
 
 def compact_name(family_name, model_name):
     if model_name.startswith(family_name):
@@ -9981,30 +9373,6 @@ def change_model_base_types(state,  current_model_family, model_base_type_choice
 
     return gr.update(scale=3 if model_finetunes_visible else 7), gr.Dropdown(choices= dropdown_choices, value = model_type, visible=model_finetunes_visible )
 
-def set_new_tab(tab_state, state, new_tab_no):
-    global vmc_event_handler    
-
-    tab_video_mask_creator = 2
-
-    old_tab_no = tab_state.get("tab_no",0)
-    # print(f"old tab {old_tab_no}, new tab {new_tab_no}")
-    if old_tab_no == tab_video_mask_creator:
-        vmc_event_handler(state, False)
-    elif new_tab_no == tab_video_mask_creator:
-        if not download_shared_done:
-            download_models()
-        vmc_event_handler(state, True)
-    tab_state["tab_no"] = new_tab_no
-    return gr.Tabs() 
-
-def select_tab(tab_state, state, evt:gr.SelectData):
-    old_tab_no = tab_state.get("tab_no",0)
-    if old_tab_no == 0:
-        saveform_trigger = get_unique_id()
-    else:
-        saveform_trigger = gr.update()
-    return set_new_tab(tab_state, state, evt.index), saveform_trigger
-
 def get_js():
     start_quit_timer_js = """
     () => {
@@ -10123,7 +9491,6 @@ def get_js():
     return start_quit_timer_js, cancel_quit_timer_js, trigger_zip_download_js, trigger_settings_download_js, click_brush_js
 
 def create_ui():
-    global vmc_event_handler    
     css = """
         .postprocess div,  
         .postprocess span,    
@@ -10673,11 +10040,11 @@ def create_ui():
                         stats_element = stats_app.get_gradio_element()
 
                 with gr.Row():
-                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger
+                    (   state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, generator_tab_components
                     ) = generate_video_tab(model_family=model_family, model_base_type_choice= model_base_type_choice, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs, tab_id='generate')
             with gr.Tab("Edit", id="edit") as edit_tab:
                 edit_title_md = gr.Markdown()
-                edit_tab_components = generate_video_tab(
+                edit_tab_inputs, edit_tab_components = generate_video_tab(
                     update_form=False, 
                     state_dict=state.value, 
                     ui_defaults=get_default_settings(transformer_type), 
@@ -10692,7 +10059,7 @@ def create_ui():
                 def fill_inputs_for_edit(state):
                     editing_task_index = state.get("editing_task_index", None)
                     if editing_task_index is None:
-                        return [gr.update()] + [gr.update()] * len(edit_tab_components)
+                        return [gr.update()] + [gr.update()] * len(edit_tab_inputs)
 
                     gen = get_gen_info(state)
                     queue = gen.get("queue", [])
@@ -10701,7 +10068,7 @@ def create_ui():
                     if task_to_edit_index >= len(queue):
                         gr.Warning("Task to edit not found in queue.")
                         state["editing_task_index"] = None
-                        return [gr.update()] + [gr.update()] * len(edit_tab_components)
+                        return [gr.update()] + [gr.update()] * len(edit_tab_inputs)
 
                     task = queue[task_to_edit_index]
                     ui_defaults = task['params'].copy()
@@ -10723,25 +10090,19 @@ def create_ui():
                 edit_tab.select(
                     fn=fill_inputs_for_edit,
                     inputs=[state],
-                    outputs=[edit_title_md] + edit_tab_components
+                    outputs=[edit_title_md] + edit_tab_inputs
                 )
-            with gr.Tab("Guides", id="info") as info_tab:
-                generate_info_tab()
-            with gr.Tab("Video Mask Creator", id="video_mask_creator") as video_mask_creator:
-                matanyone_app.display(main_tabs, tab_state, state, refresh_form_trigger, server_config, get_current_model_settings) 
-            if not args.lock_config:
-                with gr.Tab("Downloads", id="downloads") as downloads_tab:
-                    generate_download_tab(lset_name, loras_choices, state)
-                with gr.Tab("Configuration", id="configuration") as configuration_tab:
-                    generate_configuration_tab(state, main, header, model_family, model_base_type_choice, model_choice, resolution, refresh_form_trigger)
-            with gr.Tab("About"):
-                generate_about_tab()
+            globals()['main_tabs'] = main_tabs
+            globals()['refresh_form_trigger'] = refresh_form_trigger
+            globals()['save_form_trigger'] = save_form_trigger
+            globals()['state'] = state
+            app.finalize_ui_setup(globals(), [generator_tab_components, edit_tab_components])
         if stats_app is not None:
             stats_app.setup_events(main, state)
-        main_tabs.select(fn=select_tab, inputs= [tab_state, state], outputs= [main_tabs, save_form_trigger], trigger_mode="multiple")
         return main
 
 if __name__ == "__main__":
+    app = WAN2GPApplication()
     atexit.register(autosave_queue)
     download_ffmpeg()
     # threading.Thread(target=runner, daemon=True).start()

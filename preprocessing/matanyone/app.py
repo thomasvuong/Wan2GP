@@ -902,50 +902,31 @@ def teleport_to_video_tab(tab_state, state):
     set_new_tab(tab_state, state, 0)
     return gr.Tabs(selected="video_gen")
 
+get_current_model_settings = None
+video_output_codec = "libx264_8"
+image_output_codec = "jpeg_95"
 
-def display(tabs, tab_state, state, refresh_form_trigger, server_config, get_current_model_settings_fn): #,  vace_video_input, vace_image_input, vace_video_mask, vace_image_mask, vace_image_refs):
-    # my_tab.select(fn=load_unload_models, inputs=[], outputs=[])
-    global image_output_codec, video_output_codec, get_current_model_settings
-    get_current_model_settings = get_current_model_settings_fn
-
-    image_output_codec = server_config.get("image_output_codec", None)
-    video_output_codec = server_config.get("video_output_codec", None)
-
-    media_url = "https://github.com/pq-yang/MatAnyone/releases/download/media/"
-
-    click_brush_js = """
-    () => {
-        setTimeout(() => {
-            const brushButton = document.querySelector('button[aria-label="Brush"]');
-            if (brushButton) {
-                brushButton.click();
-                console.log('Brush button clicked');
-            } else {
-                console.log('Brush button not found');
-            }
-        }, 1000);
-    }    """
-
-    # download assets
-
-    gr.Markdown("<B>Mast Edition is provided by MatAnyone, VRAM optimizations & Extended Masks by DeepBeepMeep</B>")
+def create_ui_components():
+    """
+    Phase 1: Create UI components and return them in a dictionary.
+    This function should have NO external dependencies from the main app.
+    """
+    gr.Markdown("<B>Mask Edition is provided by MatAnyone, VRAM optimizations & Extended Masks by DeepBeepMeep</B>")
     gr.Markdown("If you have some trouble creating the perfect mask, be aware of these tips:")
     gr.Markdown("- Using the Matanyone Settings you can also define Negative Point Prompts to remove parts of the current selection.")
     gr.Markdown("- Sometime it is very hard to fit everything you want in a single mask, it may be much easier to combine multiple independent sub Masks before producing the Matting : each sub Mask is created by selecting an  area of an image and by clicking the Add Mask button. Sub masks can then be enabled / disabled in the Matanyone settings.")
     gr.Markdown("The Mask Generation time and the VRAM consumed are proportional to the number of frames and the resolution. So if relevant, you may reduce the number of frames in the Matanyone Settings. You will need for the moment to resize yourself the video if needed.")
     
-    with gr.Column( visible=True):
+    with gr.Column(visible=True) as main_column:
         with gr.Row():
-            with gr.Accordion("Video Tutorial (click to expand)", open=False, elem_classes="custom-bg"):
+            with gr.Accordion("Video Tutorial (click to expand)", open=False, elem_classes="custom-bg") as video_tutorial_accordion:
                 with gr.Row():
                     with gr.Column():
                         gr.Markdown("### Case 1: Single Target")
                         gr.Video(value="preprocessing/matanyone/tutorial_single_target.mp4", elem_classes="video")
-
                     with gr.Column():
                         gr.Markdown("### Case 2: Multiple Targets")
                         gr.Video(value="preprocessing/matanyone/tutorial_multi_targets.mp4", elem_classes="video")
-
         with gr.Row():
             new_dim= gr.Dropdown(
                 choices=[
@@ -958,7 +939,6 @@ def display(tabs, tab_state, state, refresh_form_trigger, server_config, get_cur
                     ("480p - Outer Frame", "480p - Outer Frame"),                     
                 ],   label = "Resize Input / Output", value = ""
             ) 
-
             mask_type= gr.Dropdown(
                 choices=[
                     ("Grey with Alpha (used by WanGP)", "wangp"),
@@ -966,401 +946,186 @@ def display(tabs, tab_state, state, refresh_form_trigger, server_config, get_cur
                     ("RGB With Alpha Channel (local Zip file)", "alpha")
                 ],   label = "Mask Type", value = "wangp"
             ) 
-
             matting_type = gr.Radio(
                 choices=["Foreground", "Background"],
                 value="Foreground",
                 label="Type of Video Matting to Generate",
                 scale=1)
-
-            
         with gr.Row(visible=False):
             dummy = gr.Text()        
-
-        with gr.Tabs():
+        with gr.Tabs() as main_media_tabs:
             with gr.TabItem("Video"):
-
-                click_state = gr.State([[],[]])
-
-                interactive_state = gr.State({
-                    "inference_times": 0,
-                    "negative_click_times" : 0,
-                    "positive_click_times": 0,
-                    "mask_save": arg_mask_save,
-                    "multi_mask": {
-                        "mask_names": [],
-                        "masks": []
-                    },
-                    "track_end_number": None,
-                    }
-                )
-
-                video_state = gr.State(
-                    {
-                    "user_name": "",
-                    "video_name": "",
-                    "origin_images": None,
-                    "painted_images": None,
-                    "masks": None,
-                    "inpaint_masks": None,
-                    "logits": None,
-                    "select_frame_number": 0,
-                    "fps": 16,
-                    "audio": "",
-                    }
-                )
-
-                with gr.Column( visible=True):
+                click_state_video = gr.State([[],[]])
+                interactive_state_video = gr.State({
+                    "inference_times": 0, "negative_click_times" : 0, "positive_click_times": 0, "mask_save": arg_mask_save,
+                    "multi_mask": { "mask_names": [], "masks": [] }, "track_end_number": None,
+                })
+                video_state = gr.State({
+                    "user_name": "", "video_name": "", "origin_images": None, "painted_images": None, "masks": None, "inpaint_masks": None,
+                    "logits": None, "select_frame_number": 0, "fps": 16, "audio": "",
+                })
+                with gr.Column(visible=True) as video_column:
                     with gr.Row():
-                        with gr.Accordion('MatAnyone Settings (click to expand)', open=False):
+                        with gr.Accordion('MatAnyone Settings (click to expand)', open=False) as video_settings_accordion:
                             with gr.Row():
-                                erode_kernel_size = gr.Slider(label='Erode Kernel Size',
-                                                        minimum=0,
-                                                        maximum=30,
-                                                        step=1,
-                                                        value=10,
-                                                        info="Erosion on the added mask",
-                                                        interactive=True)
-                                dilate_kernel_size = gr.Slider(label='Dilate Kernel Size',
-                                                        minimum=0,
-                                                        maximum=30,
-                                                        step=1,
-                                                        value=10,
-                                                        info="Dilation on the added mask",
-                                                        interactive=True)
-
+                                erode_kernel_size_video = gr.Slider(label='Erode Kernel Size', minimum=0, maximum=30, step=1, value=10, info="Erosion on the added mask", interactive=True)
+                                dilate_kernel_size_video = gr.Slider(label='Dilate Kernel Size', minimum=0, maximum=30, step=1, value=10, info="Dilation on the added mask", interactive=True)
                             with gr.Row():
-                                image_selection_slider = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Start Frame", info="Choose the start frame for target assignment and video matting", visible=False)
-                                end_selection_slider = gr.Slider(minimum=1, maximum=300, step=1, value=81, label="Last Frame to Process", info="Last Frame to Process", visible=False)
-
-                                track_pause_number_slider = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="End frame", visible=False)
+                                image_selection_slider_video = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Start Frame", info="Choose the start frame for target assignment and video matting", visible=False)
+                                end_selection_slider_video = gr.Slider(minimum=1, maximum=300, step=1, value=81, label="Last Frame to Process", info="Last Frame to Process", visible=False)
+                                track_pause_number_slider_video = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="End frame", visible=False)
                             with gr.Row():
-                                point_prompt = gr.Radio(
-                                    choices=["Positive", "Negative"],
-                                    value="Positive",
-                                    label="Point Prompt",
-                                    info="Click to add positive or negative point for target mask",
-                                    interactive=True,
-                                    visible=False,
-                                    min_width=100,
-                                    scale=1)
-                                mask_dropdown = gr.Dropdown(multiselect=True, value=[], label="Mask Selection", info="Choose 1~all mask(s) added in Step 2", visible=False, scale=2, allow_custom_value=True)
-
-                    # input video
+                                point_prompt_video = gr.Radio(choices=["Positive", "Negative"], value="Positive", label="Point Prompt", info="Click to add positive or negative point for target mask", interactive=True, visible=False, min_width=100, scale=1)
+                                mask_dropdown_video = gr.Dropdown(multiselect=True, value=[], label="Mask Selection", info="Choose 1~all mask(s) added in Step 2", visible=False, scale=2, allow_custom_value=True)
                     with gr.Row(equal_height=True):
                         with gr.Column(scale=2): 
                             gr.Markdown("## Step1: Upload video")
                         with gr.Column(scale=2): 
-                            step2_title = gr.Markdown("## Step2: Add masks <small>(Several clicks then **`Add Mask`** <u>one by one</u>)</small>", visible=False)
+                            step2_title_video = gr.Markdown("## Step2: Add masks <small>(Several clicks then **`Add Mask`** <u>one by one</u>)</small>", visible=False)
                     with gr.Row(equal_height=True):
                         with gr.Column(scale=2):      
                             video_input = gr.Video(label="Input Video", elem_classes="video")
-                            extract_frames_button = gr.Button(value="Load Video", interactive=True, elem_classes="new_button")
+                            extract_frames_button_video = gr.Button(value="Load Video", interactive=True, elem_classes="new_button")
                         with gr.Column(scale=2):
                             video_info = gr.Textbox(label="Video Info", visible=False)
-                            template_frame = gr.Image(label="Start Frame", type="pil",interactive=True, elem_id="template_frame", visible=False, elem_classes="image")
+                            template_frame_video = gr.Image(label="Start Frame", type="pil",interactive=True, elem_id="template_frame_video", visible=False, elem_classes="image")
                             with gr.Row():
-                                clear_button_click = gr.Button(value="Clear Clicks", interactive=True, visible=False,  min_width=100)
-                                add_mask_button = gr.Button(value="Add Mask", interactive=True, visible=False, min_width=100)
-                                remove_mask_button = gr.Button(value="Remove Mask", interactive=True, visible=False,  min_width=100) # no use
-                                matting_button = gr.Button(value="Generate Video Matting", interactive=True, visible=False,  min_width=100)
-                            with gr.Row():
-                                gr.Markdown("")            
-
-                    # output video
-                    with gr.Column() as output_row: #equal_height=True
+                                clear_button_click_video = gr.Button(value="Clear Clicks", interactive=True, visible=False, min_width=100)
+                                add_mask_button_video = gr.Button(value="Add Mask", interactive=True, visible=False, min_width=100)
+                                remove_mask_button_video = gr.Button(value="Remove Mask", interactive=True, visible=False, min_width=100)
+                                matting_button_video = gr.Button(value="Generate Video Matting", interactive=True, visible=False, min_width=100)
+                            with gr.Row(): gr.Markdown("")            
+                    with gr.Column() as output_row_video:
                         with gr.Row():
                             with gr.Column(scale=2):
                                 foreground_video_output = gr.Video(label="Original Video Input", visible=False, elem_classes="video")
-                                foreground_output_button = gr.Button(value="Black & White Video Output", visible=False, elem_classes="new_button")
                             with gr.Column(scale=2):
                                 alpha_video_output = gr.Video(label="Mask Video Output", visible=False, elem_classes="video")
-                                export_image_mask_btn = gr.Button(value="Alpha Mask Output", visible=False, elem_classes="new_button")
                         with gr.Row():
-                            with gr.Row(visible= False):
-                                export_to_vace_video_14B_btn = gr.Button("Export to current Video Input Video For Inpainting", visible= False)
-                            with gr.Row(visible= True):
-                                export_to_current_video_engine_btn = gr.Button("Export to Control Video Input and Video Mask Input", visible= False)
-                                    
-                export_to_current_video_engine_btn.click(  fn=export_to_current_video_engine, inputs= [state, foreground_video_output, alpha_video_output], outputs= [refresh_form_trigger]).then( #video_prompt_video_guide_trigger, 
-                    fn=teleport_to_video_tab, inputs= [tab_state, state], outputs= [tabs])
-
-
-                # first step: get the video information     
-                extract_frames_button.click(
-                    fn=get_frames_from_video,
-                    inputs=[
-                        state, video_input, video_state, new_dim
-                    ],
-                    outputs=[video_state, extract_frames_button, video_info, template_frame,
-                            image_selection_slider, end_selection_slider,  track_pause_number_slider, point_prompt, dummy, clear_button_click, add_mask_button, matting_button, template_frame,
-                            foreground_video_output, alpha_video_output, foreground_output_button, export_image_mask_btn, mask_dropdown, step2_title]
-                )   
-
-                # second step: select images from slider
-                image_selection_slider.release(fn=select_video_template, 
-                                            inputs=[image_selection_slider, video_state, interactive_state], 
-                                            outputs=[template_frame, video_state, interactive_state], api_name="select_image")
-                track_pause_number_slider.release(fn=get_end_number, 
-                                            inputs=[track_pause_number_slider, video_state, interactive_state], 
-                                            outputs=[template_frame, interactive_state], api_name="end_image")
-                
-                # click select image to get mask using sam
-                template_frame.select(
-                    fn=sam_refine,
-                    inputs=[state, video_state, point_prompt, click_state, interactive_state],
-                    outputs=[template_frame, video_state, interactive_state]
-                )
-
-                # add different mask
-                add_mask_button.click(
-                    fn=add_multi_mask,
-                    inputs=[video_state, interactive_state, mask_dropdown],
-                    outputs=[interactive_state, mask_dropdown, template_frame, click_state]
-                )
-
-                remove_mask_button.click(
-                    fn=remove_multi_mask,
-                    inputs=[interactive_state, mask_dropdown],
-                    outputs=[interactive_state, mask_dropdown]
-                )
-
-                # video matting
-                matting_button.click(
-                    fn=show_outputs,
-                    inputs=[],
-                    outputs=[foreground_video_output, alpha_video_output]).then(
-                    fn=video_matting,
-                    inputs=[state, video_state, mask_type, video_input, end_selection_slider, matting_type, new_dim, interactive_state, mask_dropdown, erode_kernel_size, dilate_kernel_size],
-                    outputs=[foreground_video_output, alpha_video_output,foreground_video_output, alpha_video_output, export_to_vace_video_14B_btn, export_to_current_video_engine_btn]
-                )
-
-                # click to get mask
-                mask_dropdown.change(
-                    fn=show_mask,
-                    inputs=[video_state, interactive_state, mask_dropdown],
-                    outputs=[template_frame]
-                )
-                
-                # clear input
-                video_input.change(
-                    fn=restart,
-                    inputs=[],
-                    outputs=[ 
-                        video_state,
-                        interactive_state,
-                        click_state, 
-                        extract_frames_button, dummy,
-                        foreground_video_output, dummy, alpha_video_output,
-                        template_frame,
-                        image_selection_slider, end_selection_slider, track_pause_number_slider,point_prompt, export_to_vace_video_14B_btn, export_to_current_video_engine_btn, dummy, clear_button_click, 
-                        add_mask_button, matting_button, template_frame, foreground_video_output, alpha_video_output, remove_mask_button, foreground_output_button, export_image_mask_btn, mask_dropdown, video_info, step2_title
-                    ],
-                    queue=False,
-                    show_progress=False)
-                
-                video_input.clear(
-                    fn=restart,
-                    inputs=[],
-                    outputs=[ 
-                        video_state,
-                        interactive_state,
-                        click_state,
-                        extract_frames_button, dummy,
-                        foreground_video_output, dummy, alpha_video_output,
-                        template_frame,
-                        image_selection_slider , end_selection_slider, track_pause_number_slider,point_prompt, export_to_vace_video_14B_btn, export_to_current_video_engine_btn, dummy, clear_button_click, 
-                        add_mask_button, matting_button, template_frame, foreground_video_output, alpha_video_output, remove_mask_button, foreground_output_button, export_image_mask_btn, mask_dropdown, video_info, step2_title
-                    ],
-                    queue=False,
-                    show_progress=False)
-                
-                # points clear
-                clear_button_click.click(
-                    fn = clear_click,
-                    inputs = [video_state, click_state,],
-                    outputs = [template_frame,click_state],
-                )
-
-
+                            export_to_current_video_engine_btn = gr.Button("Export to Control Video Input and Video Mask Input", visible=False)
 
             with gr.TabItem("Image"):
-                click_state = gr.State([[],[]])
-
-                interactive_state = gr.State({
-                    "inference_times": 0,
-                    "negative_click_times" : 0,
-                    "positive_click_times": 0,
-                    "mask_save": False,
-                    "multi_mask": {
-                        "mask_names": [],
-                        "masks": []
-                    },
-                    "track_end_number": None,
-                    }
-                )
-
-                image_state = gr.State(
-                    {
-                    "user_name": "",
-                    "image_name": "",
-                    "origin_images": None,
-                    "painted_images": None,
-                    "masks": None,
-                    "inpaint_masks": None,
-                    "logits": None,
-                    "select_frame_number": 0,
-                    "fps": 30
-                    }
-                )
-
-                with gr.Group(elem_classes="gr-monochrome-group", visible=True):
+                click_state_image = gr.State([[],[]])
+                interactive_state_image = gr.State({
+                    "inference_times": 0, "negative_click_times" : 0, "positive_click_times": 0, "mask_save": arg_mask_save,
+                    "multi_mask": { "mask_names": [], "masks": [] }, "track_end_number": None,
+                })
+                image_state = gr.State({
+                    "user_name": "", "image_name": "", "origin_images": None, "painted_images": None, "masks": None, "inpaint_masks": None,
+                    "logits": None, "select_frame_number": 0, "fps": 30
+                })
+                with gr.Group(elem_classes="gr-monochrome-group", visible=True) as image_settings_group:
                     with gr.Row():
-                        with gr.Accordion('MatAnyone Settings (click to expand)', open=False):
+                        with gr.Accordion('MatAnyone Settings (click to expand)', open=False) as image_settings_accordion:
                             with gr.Row():
-                                erode_kernel_size = gr.Slider(label='Erode Kernel Size',
-                                                        minimum=0,
-                                                        maximum=30,
-                                                        step=1,
-                                                        value=10,
-                                                        info="Erosion on the added mask",
-                                                        interactive=True)
-                                dilate_kernel_size = gr.Slider(label='Dilate Kernel Size',
-                                                        minimum=0,
-                                                        maximum=30,
-                                                        step=1,
-                                                        value=10,
-                                                        info="Dilation on the added mask",
-                                                        interactive=True)
-                                
+                                erode_kernel_size_image = gr.Slider(label='Erode Kernel Size', minimum=0, maximum=30, step=1, value=10, info="Erosion on the added mask", interactive=True)
+                                dilate_kernel_size_image = gr.Slider(label='Dilate Kernel Size', minimum=0, maximum=30, step=1, value=10, info="Dilation on the added mask", interactive=True)
                             with gr.Row():
-                                image_selection_slider = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Num of Refinement Iterations", info="More iterations → More details & More time", visible=False)
-                                track_pause_number_slider = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Track end frame", visible=False)
+                                image_selection_slider_image = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Num of Refinement Iterations", info="More iterations → More details & More time", visible=False)
+                                track_pause_number_slider_image = gr.Slider(minimum=1, maximum=100, step=1, value=1, label="Track end frame", visible=False)
                             with gr.Row():
-                                point_prompt = gr.Radio(
-                                    choices=["Positive", "Negative"],
-                                    value="Positive",
-                                    label="Point Prompt",
-                                    info="Click to add positive or negative point for target mask",
-                                    interactive=True,
-                                    visible=False,
-                                    min_width=100,
-                                    scale=1)
-                                mask_dropdown = gr.Dropdown(multiselect=True, value=[], label="Mask Selection", info="Choose 1~all mask(s) added in Step 2", visible=False)
-                
-
-                with gr.Column():
-                    # input image
+                                point_prompt_image = gr.Radio(choices=["Positive", "Negative"], value="Positive", label="Point Prompt", info="Click to add positive or negative point for target mask", interactive=True, visible=False, min_width=100, scale=1)
+                                mask_dropdown_image = gr.Dropdown(multiselect=True, value=[], label="Mask Selection", info="Choose 1~all mask(s) added in Step 2", visible=False)
+                with gr.Column() as image_column:
                     with gr.Row(equal_height=True):
                         with gr.Column(scale=2): 
                             gr.Markdown("## Step1: Upload image")
                         with gr.Column(scale=2): 
-                            step2_title = gr.Markdown("## Step2: Add masks <small>(Several clicks then **`Add Mask`** <u>one by one</u>)</small>", visible=False)
+                            step2_title_image = gr.Markdown("## Step2: Add masks <small>(Several clicks then **`Add Mask`** <u>one by one</u>)</small>", visible=False)
                     with gr.Row(equal_height=True):
                         with gr.Column(scale=2):      
                             image_input = gr.Image(label="Input Image", elem_classes="image")
-                            extract_frames_button = gr.Button(value="Load Image", interactive=True, elem_classes="new_button")
+                            extract_frames_button_image = gr.Button(value="Load Image", interactive=True, elem_classes="new_button")
                         with gr.Column(scale=2):
                             image_info = gr.Textbox(label="Image Info", visible=False)
-                            template_frame = gr.Image(type="pil", label="Start Frame", interactive=True, elem_id="template_frame", visible=False, elem_classes="image")
+                            template_frame_image = gr.Image(type="pil", label="Start Frame", interactive=True, elem_id="template_frame_image", visible=False, elem_classes="image")
                             with gr.Row(equal_height=True, elem_classes="mask_button_group"):
-                                clear_button_click = gr.Button(value="Clear Clicks", interactive=True, visible=False, elem_classes="new_button", min_width=100)
-                                add_mask_button = gr.Button(value="Add Mask", interactive=True, visible=False, elem_classes="new_button", min_width=100)
-                                remove_mask_button = gr.Button(value="Remove Mask", interactive=True, visible=False, elem_classes="new_button", min_width=100)
-                                matting_button = gr.Button(value="Image Matting", interactive=True, visible=False, elem_classes="green_button", min_width=100)
-
-                    # output image
-                    with gr.Tabs(visible = False) as image_tabs:
-                        with gr.TabItem("Control Image & Mask", visible = False) as image_first_tab:
+                                clear_button_click_image = gr.Button(value="Clear Clicks", interactive=True, visible=False, elem_classes="new_button", min_width=100)
+                                add_mask_button_image = gr.Button(value="Add Mask", interactive=True, visible=False, elem_classes="new_button", min_width=100)
+                                remove_mask_button_image = gr.Button(value="Remove Mask", interactive=True, visible=False, elem_classes="new_button", min_width=100)
+                                matting_button_image = gr.Button(value="Image Matting", interactive=True, visible=False, elem_classes="green_button", min_width=100)
+                    with gr.Tabs(visible=False) as image_tabs:
+                        with gr.TabItem("Control Image & Mask", visible=False) as image_first_tab:
                             with gr.Row(equal_height=True):
                                 control_image_output = gr.Image(type="pil", label="Control Image", visible=False, elem_classes="image")
                                 alpha_image_output = gr.Image(type="pil", label="Mask", visible=False, elem_classes="image")
                             with gr.Row():
                                 export_image_mask_btn = gr.Button(value="Set to Control Image & Mask", visible=False, elem_classes="new_button")
-                        with gr.TabItem("Reference Image", visible = False) as image_second_tab:
+                        with gr.TabItem("Reference Image", visible=False) as image_second_tab:
                             with gr.Row():
                                 foreground_image_output = gr.Image(type="pil", label="Foreground Output", visible=False, elem_classes="image")
                             with gr.Row():
                                 export_image_btn = gr.Button(value="Add to current Reference Images", visible=False, elem_classes="new_button")
-
                     with gr.Row(equal_height=True):
                         bbox_info = gr.Text(label ="Mask BBox Info (Left:Top:Right:Bottom)", visible = False, interactive= False)
+    
+    return locals()
 
-                export_image_btn.click(  fn=export_image, inputs= [state, foreground_image_output], outputs= [refresh_form_trigger]).then( #video_prompt_video_guide_trigger, 
-                    fn=teleport_to_video_tab, inputs= [tab_state, state], outputs= [tabs])
-                export_image_mask_btn.click(  fn=export_image_mask, inputs= [state, control_image_output, alpha_image_output], outputs= [refresh_form_trigger]).then( #video_prompt_video_guide_trigger, 
-                    fn=teleport_to_video_tab, inputs= [tab_state, state], outputs= [tabs]).then(fn=None, inputs=None, outputs=None, js=click_brush_js)
+def bind_events(components, tabs, tab_state, state, refresh_form_trigger, server_config, get_current_model_settings_fn):
+    """Binds all event listeners for the UI components."""
+    global get_current_model_settings, video_output_codec, image_output_codec
+    get_current_model_settings = get_current_model_settings_fn
+    video_output_codec = server_config.get("video_output_codec", "libx264_8")
+    image_output_codec = server_config.get("image_output_codec", "jpeg_95")
 
-                # first step: get the image information 
-                extract_frames_button.click(
-                    fn=get_frames_from_image,
-                    inputs=[
-                        state, image_input, image_state, new_dim
-                    ],
-                    outputs=[image_state, extract_frames_button, image_info, template_frame,
-                            image_selection_slider, track_pause_number_slider,point_prompt, clear_button_click, add_mask_button, matting_button, template_frame,
-                            foreground_image_output, alpha_image_output, control_image_output, image_tabs, bbox_info, export_image_btn, export_image_mask_btn, mask_dropdown, step2_title]
-                )   
+    globals().update(components)
 
-                # points clear
-                clear_button_click.click(
-                    fn = clear_click,
-                    inputs = [image_state, click_state,],
-                    outputs = [template_frame,click_state],
-                )
+    click_brush_js = """
+    () => {
+        setTimeout(() => {
+            const brushButton = document.querySelector('button[aria-label="Brush"]');
+            if (brushButton) {
+                brushButton.click();
+            }
+        }, 1000);
+    }"""
+    
+    # --- Video Tab Events ---
+    extract_frames_button_video.click(
+        fn=get_frames_from_video,
+        inputs=[state, video_input, video_state, new_dim],
+        outputs=[video_state, extract_frames_button_video, video_info, template_frame_video,
+                 image_selection_slider_video, end_selection_slider_video, track_pause_number_slider_video,
+                 point_prompt_video, dummy, clear_button_click_video, add_mask_button_video, matting_button_video, template_frame_video,
+                 foreground_video_output, alpha_video_output, gr.Button(visible=False), gr.Button(visible=False), mask_dropdown_video, step2_title_video]
+    )
+    image_selection_slider_video.release(fn=select_video_template, inputs=[image_selection_slider_video, video_state, interactive_state_video], outputs=[template_frame_video, video_state, interactive_state_video], api_name="select_video")
+    track_pause_number_slider_video.release(fn=get_end_number, inputs=[track_pause_number_slider_video, video_state, interactive_state_video], outputs=[template_frame_video, interactive_state_video])
+    template_frame_video.select(fn=sam_refine, inputs=[state, video_state, point_prompt_video, click_state_video, interactive_state_video], outputs=[template_frame_video, video_state, interactive_state_video])
+    add_mask_button_video.click(fn=add_multi_mask, inputs=[video_state, interactive_state_video, mask_dropdown_video], outputs=[interactive_state_video, mask_dropdown_video, template_frame_video, click_state_video])
+    remove_mask_button_video.click(fn=remove_multi_mask, inputs=[interactive_state_video, mask_dropdown_video], outputs=[interactive_state_video, mask_dropdown_video])
+    matting_button_video.click(
+        fn=show_outputs, inputs=[], outputs=[foreground_video_output, alpha_video_output]
+    ).then(
+        fn=video_matting,
+        inputs=[state, video_state, mask_type, video_input, end_selection_slider_video, matting_type, new_dim, interactive_state_video, mask_dropdown_video, erode_kernel_size_video, dilate_kernel_size_video],
+        outputs=[foreground_video_output, alpha_video_output, foreground_video_output, alpha_video_output, gr.Button(visible=False), export_to_current_video_engine_btn]
+    )
+    mask_dropdown_video.change(fn=show_mask, inputs=[video_state, interactive_state_video, mask_dropdown_video], outputs=[template_frame_video])
+    video_input.change(fn=restart, inputs=[], outputs=[video_state, interactive_state_video, click_state_video, extract_frames_button_video, dummy, foreground_video_output, dummy, alpha_video_output, template_frame_video, image_selection_slider_video, end_selection_slider_video, track_pause_number_slider_video, point_prompt_video, gr.Button(visible=False), export_to_current_video_engine_btn, dummy, clear_button_click_video, add_mask_button_video, matting_button_video, template_frame_video, foreground_video_output, alpha_video_output, remove_mask_button_video, gr.Button(visible=False), gr.Button(visible=False), mask_dropdown_video, video_info, step2_title_video], queue=False, show_progress=False)
+    video_input.clear(fn=restart, inputs=[], outputs=[video_state, interactive_state_video, click_state_video, extract_frames_button_video, dummy, foreground_video_output, dummy, alpha_video_output, template_frame_video, image_selection_slider_video, end_selection_slider_video, track_pause_number_slider_video, point_prompt_video, gr.Button(visible=False), export_to_current_video_engine_btn, dummy, clear_button_click_video, add_mask_button_video, matting_button_video, template_frame_video, foreground_video_output, alpha_video_output, remove_mask_button_video, gr.Button(visible=False), gr.Button(visible=False), mask_dropdown_video, video_info, step2_title_video], queue=False, show_progress=False)
+    clear_button_click_video.click(fn=clear_click, inputs=[video_state, click_state_video], outputs=[template_frame_video, click_state_video])
+    export_to_current_video_engine_btn.click(fn=export_to_current_video_engine, inputs=[state, foreground_video_output, alpha_video_output], outputs=[refresh_form_trigger]).then(fn=teleport_to_video_tab, inputs=[gr.State({}), state], outputs=[tabs])
 
-
-                # second step: select images from slider
-                image_selection_slider.release(fn=select_image_template, 
-                                            inputs=[image_selection_slider, image_state, interactive_state], 
-                                            outputs=[template_frame, image_state, interactive_state], api_name="select_image")
-                track_pause_number_slider.release(fn=get_end_number, 
-                                            inputs=[track_pause_number_slider, image_state, interactive_state], 
-                                            outputs=[template_frame, interactive_state], api_name="end_image")
-                
-                # click select image to get mask using sam
-                template_frame.select(
-                    fn=sam_refine,
-                    inputs=[state, image_state, point_prompt, click_state, interactive_state],
-                    outputs=[template_frame, image_state, interactive_state]
-                )
-
-                # add different mask
-                add_mask_button.click(
-                    fn=add_multi_mask,
-                    inputs=[image_state, interactive_state, mask_dropdown],
-                    outputs=[interactive_state, mask_dropdown, template_frame, click_state]
-                )
-
-                remove_mask_button.click(
-                    fn=remove_multi_mask,
-                    inputs=[interactive_state, mask_dropdown],
-                    outputs=[interactive_state, mask_dropdown]
-                )
-
-                # image matting
-                matting_button.click(
-                    fn=image_matting,
-                    inputs=[state, image_state, interactive_state, mask_type, matting_type, new_dim, mask_dropdown, erode_kernel_size, dilate_kernel_size, image_selection_slider],
-                    outputs=[image_tabs, image_first_tab, image_second_tab, foreground_image_output, control_image_output, alpha_image_output, foreground_image_output, control_image_output, alpha_image_output, bbox_info, export_image_btn, export_image_mask_btn]
-                )
-
-                nada = gr.State({})
-                # clear input
-                gr.on(
-                    triggers=[image_input.clear], #image_input.change,
-                    fn=restart,
-                    inputs=[],
-                    outputs=[ 
-                        image_state,
-                        interactive_state,
-                        click_state,
-                        extract_frames_button, image_tabs,
-                        foreground_image_output, control_image_output, alpha_image_output,
-                        template_frame,
-                        image_selection_slider, image_selection_slider, track_pause_number_slider,point_prompt, export_image_btn, export_image_mask_btn, bbox_info, clear_button_click, 
-                        add_mask_button, matting_button, template_frame, foreground_image_output, alpha_image_output, remove_mask_button, export_image_btn, export_image_mask_btn, mask_dropdown, nada, step2_title
-                    ],
-                    queue=False,
-                    show_progress=False)
-                
+    # --- Image Tab Events ---
+    extract_frames_button_image.click(
+        fn=get_frames_from_image,
+        inputs=[state, image_input, image_state, new_dim],
+        outputs=[image_state, extract_frames_button_image, image_info, template_frame_image,
+                 image_selection_slider_image, track_pause_number_slider_image, point_prompt_image, clear_button_click_image, add_mask_button_image, matting_button_image, template_frame_image,
+                 foreground_image_output, alpha_image_output, control_image_output, image_tabs, bbox_info, export_image_btn, export_image_mask_btn, mask_dropdown_image, step2_title_image]
+    )
+    clear_button_click_image.click(fn=clear_click, inputs=[image_state, click_state_image], outputs=[template_frame_image, click_state_image])
+    image_selection_slider_image.release(fn=select_image_template, inputs=[image_selection_slider_image, image_state, interactive_state_image], outputs=[template_frame_image, image_state, interactive_state_image], api_name="select_image")
+    template_frame_image.select(fn=sam_refine, inputs=[state, image_state, point_prompt_image, click_state_image, interactive_state_image], outputs=[template_frame_image, image_state, interactive_state_image])
+    add_mask_button_image.click(fn=add_multi_mask, inputs=[image_state, interactive_state_image, mask_dropdown_image], outputs=[interactive_state_image, mask_dropdown_image, template_frame_image, click_state_image])
+    remove_mask_button_image.click(fn=remove_multi_mask, inputs=[interactive_state_image, mask_dropdown_image], outputs=[interactive_state_image, mask_dropdown_image])
+    matting_button_image.click(
+        fn=image_matting,
+        inputs=[state, image_state, interactive_state_image, mask_type, matting_type, new_dim, mask_dropdown_image, erode_kernel_size_image, dilate_kernel_size_image, image_selection_slider_image],
+        outputs=[image_tabs, image_first_tab, image_second_tab, foreground_image_output, control_image_output, alpha_image_output, foreground_image_output, control_image_output, alpha_image_output, bbox_info, export_image_btn, export_image_mask_btn]
+    )
+    nada = gr.State({})
+    image_input.clear(fn=restart, inputs=[], outputs=[image_state, interactive_state_image, click_state_image, extract_frames_button_image, image_tabs, foreground_image_output, control_image_output, alpha_image_output, template_frame_image, image_selection_slider_image, image_selection_slider_image, track_pause_number_slider_image, point_prompt_image, export_image_btn, export_image_mask_btn, bbox_info, clear_button_click_image, add_mask_button_image, matting_button_image, template_frame_image, foreground_image_output, alpha_image_output, remove_mask_button_image, export_image_btn, export_image_mask_btn, mask_dropdown_image, nada, step2_title_image], queue=False, show_progress=False)
+    export_image_btn.click(fn=export_image, inputs=[state, foreground_image_output], outputs=[refresh_form_trigger]).then(fn=teleport_to_video_tab, inputs=[gr.State({}), state], outputs=[tabs])
+    export_image_mask_btn.click(fn=export_image_mask, inputs=[state, control_image_output, alpha_image_output], outputs=[refresh_form_trigger]).then(fn=teleport_to_video_tab, inputs=[gr.State({}), state], outputs=[tabs]).then(fn=None, inputs=None, outputs=None, js=click_brush_js)
