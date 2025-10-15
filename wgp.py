@@ -9850,30 +9850,22 @@ def create_ui():
         window.updateAndTrigger = function(action) {
             const hiddenTextbox = document.querySelector('#queue_action_input textarea');
             const hiddenButton = document.querySelector('#queue_action_trigger');
-            
             if (hiddenTextbox && hiddenButton) {
                 hiddenTextbox.value = action;
-                const inputEvent = new Event('input', { bubbles: true });
-                hiddenTextbox.dispatchEvent(inputEvent);
+                hiddenTextbox.dispatchEvent(new Event('input', { bubbles: true }));
                 hiddenButton.click();
             } else {
                 console.error("Could not find hidden queue action elements.");
             }
         };
-        console.log('updateAndTrigger function for queue is ready.');
 
         window.scrollToQueueTop = function() {
             const container = document.querySelector('#queue-scroll-container');
-            if (container) {
-                container.scrollTop = 0;
-            }
+            if (container) container.scrollTop = 0;
         };
-
         window.scrollToQueueBottom = function() {
             const container = document.querySelector('#queue-scroll-container');
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-            }
+            if (container) container.scrollTop = container.scrollHeight;
         };
 
         window.showImageModal = function(action) {
@@ -9885,7 +9877,6 @@ def create_ui():
                 hiddenButton.click();
             }
         };
-
         window.closeImageModal = function() {
             const closeButton = document.querySelector('#modal_close_trigger_btn');
             if (closeButton) closeButton.click();
@@ -9893,40 +9884,34 @@ def create_ui():
 
         let draggedItem = null;
 
-        function initializeQueueDragAndDrop() {
-            const queueTbody = document.querySelector('#queue_html_container table > tbody');
-            if (!queueTbody || queueTbody.dataset.dndInitialized) {
-                return;
-            }
-            
-            queueTbody.dataset.dndInitialized = 'true';
+        function attachDelegatedDragAndDrop(container) {
+            if (container.dataset.dndDelegated) return; // Listeners already attached
+            container.dataset.dndDelegated = 'true';
 
-            queueTbody.addEventListener('dragstart', (e) => {
-                if (e.target.closest('.action-button') || e.target.closest('.hover-image')) {
-                    e.preventDefault();
+            container.addEventListener('dragstart', (e) => {
+                const row = e.target.closest('.draggable-row');
+                if (!row || e.target.closest('.action-button') || e.target.closest('.hover-image')) {
+                    if (row) e.preventDefault(); // Prevent dragging if it's on a button/image
                     return;
                 }
-                draggedItem = e.target.closest('.draggable-row');
-                if (draggedItem) {
-                    setTimeout(() => draggedItem.classList.add('dragging'), 0);
-                }
+                draggedItem = row;
+                setTimeout(() => draggedItem.classList.add('dragging'), 0);
             });
 
-            queueTbody.addEventListener('dragend', (e) => {
+            container.addEventListener('dragend', () => {
                 if (draggedItem) {
                     draggedItem.classList.remove('dragging');
-                    draggedItem = null;
-                    document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                        el.classList.remove('drag-over-top', 'drag-over-bottom');
-                    });
                 }
+                draggedItem = null;
+                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                    el.classList.remove('drag-over-top', 'drag-over-bottom');
+                });
             });
 
-            queueTbody.addEventListener('dragover', (e) => {
+            container.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 const targetRow = e.target.closest('.draggable-row');
-                
-                // Clear previous indicators
+
                 document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
                     el.classList.remove('drag-over-top', 'drag-over-bottom');
                 });
@@ -9943,54 +9928,30 @@ def create_ui():
                 }
             });
 
-            queueTbody.addEventListener('dragleave', (e) => {
-                 const relatedTarget = e.relatedTarget;
-                 const queueTable = e.currentTarget.closest('table');
-                 if (queueTable && !queueTable.contains(relatedTarget)) {
-                    document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                        el.classList.remove('drag-over-top', 'drag-over-bottom');
-                    });
-                 }
-            });
-
-            queueTbody.addEventListener('drop', (e) => {
+            container.addEventListener('drop', (e) => {
                 e.preventDefault();
                 const targetRow = e.target.closest('.draggable-row');
+                if (!draggedItem || !targetRow || targetRow === draggedItem) return;
 
-                if (draggedItem && targetRow && targetRow !== draggedItem) {
-                    const oldIndex = draggedItem.dataset.index;
-                    let newIndex = parseInt(targetRow.dataset.index);
+                const oldIndex = draggedItem.dataset.index;
+                let newIndex = parseInt(targetRow.dataset.index);
 
-                    // If dropping on the bottom half, the new index is after the target row
-                    if (targetRow.classList.contains('drag-over-bottom')) {
-                        newIndex++;
-                    }
-
-                    if (oldIndex != newIndex) {
-                       const action = `move_${oldIndex}_to_${newIndex}`;
-                       window.updateAndTrigger(action);
-                    }
+                if (targetRow.classList.contains('drag-over-bottom')) {
+                    newIndex++;
                 }
 
-                // Cleanup visual styles
-                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                    el.classList.remove('drag-over-top', 'drag-over-bottom');
-                });
-                if (draggedItem) {
-                    draggedItem.classList.remove('dragging');
-                    draggedItem = null;
+                if (oldIndex != newIndex) {
+                   const action = `move_${oldIndex}_to_${newIndex}`;
+                   window.updateAndTrigger(action);
                 }
             });
         }
-        
-        const observer = new MutationObserver((mutationsList, observer) => {
-            for(const mutation of mutationsList) {
-                if (mutation.type === 'childList') {
-                    const queueContainer = document.querySelector('#queue_html_container');
-                    if (queueContainer && queueContainer.querySelector('table > tbody')) {
-                        initializeQueueDragAndDrop();
-                    }
-                }
+
+        const observer = new MutationObserver((mutations, obs) => {
+            const container = document.querySelector('#queue_html_container');
+            if (container) {
+                attachDelegatedDragAndDrop(container);
+                obs.disconnect();
             }
         });
 
@@ -9998,10 +9959,7 @@ def create_ui():
         if (targetNode) {
             observer.observe(targetNode, { childList: true, subtree: true });
         }
-        
-        setTimeout(initializeQueueDragAndDrop, 500);
 
-        // cancel wheel usage inside image editor    
         const hit = n => n?.id === "img_editor" || n?.classList?.contains("wheel-pass");
         addEventListener("wheel", e => {
             const path = e.composedPath?.() || (() => { let a=[],n=e.target; for(;n;n=n.parentNode||n.host) a.push(n); return a; })();
