@@ -6392,7 +6392,7 @@ def switch_advanced(state, new_advanced, lset_name):
 
 
 def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None ):
-    
+    inputs.pop("plugin_data", None)
     state = inputs.pop("state")
     loras = state["loras"]
     if "loras_choices" in inputs:
