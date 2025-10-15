@@ -13,6 +13,7 @@ class GalleryPlugin(WAN2GPPlugin):
         self.name = "File Gallery"
         self.version = "1.0.0"
         self.description = "Adds a Gallery tab that allows you to view metadata of all files in your output folders, join video frames with a single click, and more"
+        self.loaded_once = False
 
     def setup_ui(self):
         self.add_tab(
@@ -512,18 +513,28 @@ class GalleryPlugin(WAN2GPPlugin):
         }
 
     def post_ui_setup(self, components: dict):
-        self.main.load(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[
+        outputs_list = [
             self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
             self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
             self.first_frame_preview, self.last_frame_preview, self.join_interface, 
             self.recreate_join_btn, self.merge_info_display
-        ])
-        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=[
-            self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
-            self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
-            self.first_frame_preview, self.last_frame_preview, self.join_interface,
-            self.recreate_join_btn, self.merge_info_display
-        ])
+        ]
+        no_updates = {comp: gr.update() for comp in outputs_list}
+
+        def on_tab_select(current_state, evt: gr.SelectData):
+            if evt.value == "Gallery" and not self.loaded_once:
+                self.loaded_once = True
+                return self.list_output_files_as_html(current_state)
+            return no_updates
+
+        self.main_tabs.select(
+            fn=on_tab_select,
+            inputs=[self.state],
+            outputs=outputs_list,
+        )
+
+        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=outputs_list)
+        
         self.selected_files_for_backend.change(fn=self.update_metadata_panel_and_buttons, 
             inputs=[self.selected_files_for_backend, self.state], 
             outputs=[
