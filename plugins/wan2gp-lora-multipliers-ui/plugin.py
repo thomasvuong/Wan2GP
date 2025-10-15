@@ -50,7 +50,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 }
                 .lora-main-container button {
                     padding: 4px 12px !important;
-                    font-size: 1.2em !important;
+                    font-size: 1em !important;
                     min-width: fit-content !important;
                     flex-grow: 0;
                     background: var(--button-secondary-background-fill);
@@ -122,7 +122,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                 else:
                     return " ".join(textbox_strings)
 
-            def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts_state, triggered_lora_index=-1):
+            def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts_state, split_lora_index=-1, rejoin_lora_index=-1):
                 multipliers_per_lora = []
                 separator_index = -1
                 if current_multipliers_str:
@@ -132,15 +132,20 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         separator_index = len(loras_before_sep)
                     multipliers_per_lora = [s for s in current_multipliers_str.replace('|', ' ').split(' ') if s]
 
-                new_split_counts = [1] * MAX_LORA_SLIDERS
-                for i in range(len(multipliers_per_lora)):
-                    if i < MAX_LORA_SLIDERS:
-                        num_splits = len(multipliers_per_lora[i].split(','))
-                        new_split_counts[i] = max(1, num_splits)
+                new_split_counts = list(current_split_counts_state)
 
-                if triggered_lora_index != -1:
-                    if new_split_counts[triggered_lora_index] < MAX_STEP_SPLITS:
-                        new_split_counts[triggered_lora_index] += 1
+                if split_lora_index == -1 and rejoin_lora_index == -1:
+                    for i in range(len(multipliers_per_lora)):
+                        if i < MAX_LORA_SLIDERS:
+                            num_splits = len(multipliers_per_lora[i].split(','))
+                            new_split_counts[i] = max(1, num_splits)
+
+                if split_lora_index != -1:
+                    if new_split_counts[split_lora_index] < MAX_STEP_SPLITS:
+                        new_split_counts[split_lora_index] += 1
+                elif rejoin_lora_index != -1:
+                    if new_split_counts[rejoin_lora_index] > 1:
+                        new_split_counts[rejoin_lora_index] -= 1 # Decrement instead of resetting
                 
                 current_split_counts = new_split_counts
                 
@@ -167,6 +172,10 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         ui_updates[group_data["name"]] = gr.update(value=f"### {lora_name}")
                         
                         num_splits_for_this_lora = current_split_counts[i]
+                        
+                        ui_updates[group_data["split_button"]] = gr.update(visible=(num_splits_for_this_lora < MAX_STEP_SPLITS))
+                        ui_updates[group_data["rejoin_button"]] = gr.update(visible=(num_splits_for_this_lora > 1))
+                        
                         steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
                         multipliers_per_step = steps_and_phases_str.split(',')
                         
@@ -198,6 +207,8 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                             else:
                                 all_slider_values_flat.extend([1.0] * 3)
                     else:
+                        ui_updates[group_data["split_button"]] = gr.update(visible=False)
+                        ui_updates[group_data["rejoin_button"]] = gr.update(visible=False)
                         all_slider_values_flat.extend([1.0] * 3 * MAX_STEP_SPLITS)
 
                 effective_separator_index = separator_index
@@ -229,7 +240,9 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         with gr.Column(visible=False, elem_classes="lora-main-container") as lora_main_group:
                             with gr.Row(variant="compact"):
                                 lora_name_md = gr.Markdown()
-                                split_steps_btn = gr.Button("Split Steps")
+                                with gr.Row():
+                                    split_steps_btn = gr.Button("Split Steps")
+                                    rejoin_steps_btn = gr.Button("Rejoin Step", visible=False)
                             
                             split_groups = []
                             for j in range(MAX_STEP_SPLITS):
@@ -245,6 +258,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                 "main_group": lora_main_group, 
                                 "name": lora_name_md, 
                                 "split_button": split_steps_btn, 
+                                "rejoin_button": rejoin_steps_btn,
                                 "splits": split_groups,
                                 "user_header": user_loras_header
                             })
@@ -254,7 +268,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             slider_ui_outputs_flat.append(accelerator_loras_header)
             for group in lora_slider_ui_groups:
                 slider_ui_outputs_flat.append(group["user_header"])
-                slider_ui_outputs_flat.extend([group["main_group"], group["name"]])
+                slider_ui_outputs_flat.extend([group["main_group"], group["name"], group["split_button"], group["rejoin_button"]])
                 for split in group["splits"]:
                     slider_ui_outputs_flat.extend([split["group"], split["title"], *split["sliders"]])
                     all_sliders_flat.extend(split["sliders"])
@@ -273,7 +287,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             for event in events_to_trigger_ui_update:
                 event(
                     fn=unpack_dict_updates_fn,
-                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
+                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(-1)],
                     outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                     show_progress="hidden"
                 )
@@ -281,7 +295,13 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             for i, group in enumerate(lora_slider_ui_groups):
                 group["split_button"].click(
                     fn=unpack_dict_updates_fn,
-                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(i)],
+                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(i), gr.State(-1)],
+                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
+                    show_progress="hidden"
+                )
+                group["rejoin_button"].click(
+                    fn=unpack_dict_updates_fn,
+                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(i)],
                     outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                     show_progress="hidden"
                 )
@@ -315,7 +335,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
 
             main_ui_block.load(
                 fn=unpack_dict_updates_fn,
-                inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
+                inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(-1)],
                 outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                 show_progress="hidden"
             )
