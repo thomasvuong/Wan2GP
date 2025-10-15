@@ -9169,7 +9169,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
     if tab_id == 'edit':
         locals_dict = locals()
-        gen_inputs = [locals_dict[k] for k in inputs_names] + [state] + extra_inputs
+        gen_inputs = [locals_dict[k] for k in inputs_names] + [state, plugin_data] + extra_inputs
         return gen_inputs
     else:
         return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, locals(),
