@@ -116,38 +116,17 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
     def _build_plugins_html(self):
         plugins_info = self.app.plugin_manager.get_plugins_info()
         enabled_user_plugins = self.server_config.get("enabled_plugins", [])
+        all_user_plugins_info = [p for p in plugins_info if not p.get('system')]
         
-        if not plugins_info:
-            return "<p style='text-align:center; color: var(--text-color-secondary);'>No plugins found.</p>"
+        if not all_user_plugins_info:
+            return "<p style='text-align:center; color: var(--text-color-secondary);'>No user-installed plugins found.</p>"
 
-        system_plugins = [p for p in plugins_info if p.get('system')]
-        user_plugins_map = {p['id']: p for p in plugins_info if not p.get('system')}
-
+        user_plugins_map = {p['id']: p for p in all_user_plugins_info}
         user_plugins = []
         for plugin_id in enabled_user_plugins:
             if plugin_id in user_plugins_map:
                 user_plugins.append(user_plugins_map.pop(plugin_id))
-        user_plugins.extend(user_plugins_map.values())
-
-        system_items_html = ""
-        for plugin in system_plugins:
-            system_items_html += f"""
-            <div class="plugin-item" data-plugin-id="{plugin['id']}">
-                <div class="plugin-info-container">
-                    <input type="checkbox" class="plugin-enable-checkbox" checked disabled>
-                    <div class="plugin-item-info">
-                        <div class="plugin-header">
-                            <span class="name">{plugin['name']}</span>
-                            <span class="version">version {plugin['version']} (id: {plugin['id']})</span>
-                        </div>
-                        <span class="description">{plugin['description']}</span>
-                    </div>
-                </div>
-                 <div class="plugin-item-actions">
-                    <span class="system-plugin-tag">System Plugin</span>
-                </div>
-            </div>
-            """
+        user_plugins.extend(user_plugins_map.values()) # Add remaining (disabled) plugins
 
         user_items_html = ""
         for plugin in user_plugins:
@@ -180,8 +159,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             .plugin-item:hover { box-shadow: var(--shadow-drop-lg); }
             .plugin-item[draggable="true"] { cursor: grab; }
             .plugin-item[draggable="true"]:active { cursor: grabbing; }
-            .plugin-section-header { margin-top: 20px; margin-bottom: 10px; font-size: 1.2em; font-weight: bold; color: var(--text-color-primary); border-bottom: 1px solid var(--border-color-primary); padding-bottom: 5px; }
-            .system-plugin-tag { font-size: 0.9em; font-style: italic; color: var(--text-color-secondary); }
+            .plugin-section-header { margin-bottom: 10px; font-size: 1.2em; font-weight: bold; color: var(--text-color-primary); border-bottom: 1px solid var(--border-color-primary); padding-bottom: 5px; }
             .plugin-info-container { display: flex; align-items: center; gap: 16px; flex-grow: 1; }
             .plugin-item-info { display: flex; flex-direction: column; gap: 4px; }
             .plugin-item-info .name { font-weight: 600; font-size: 1.1em; color: var(--text-color-primary); font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif; }
@@ -194,8 +172,6 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             .plugin-enable-checkbox:hover { border-color: var(--color-accent); }
             .plugin-enable-checkbox:checked { background-color: var(--color-accent); border-color: var(--color-accent); }
             .plugin-enable-checkbox:checked::after { content: '✔'; position: absolute; color: white; font-size: 16px; font-weight: bold; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-            .plugin-enable-checkbox:disabled { cursor: not-allowed; border-color: var(--border-color-accent-subdued); background-color: var(--background-fill-primary-hover); }
-            .plugin-enable-checkbox:disabled:checked { background-color: var(--color-accent-soft); border-color: var(--color-accent-soft); }
             .save-buttons-container { justify-content: flex-start; margin-top: 20px !important; gap: 12px; }
             .stylish-save-btn { font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif !important; font-weight: 600 !important; font-size: 1.05em !important; padding: 10px 20px !important; }
         </style>
@@ -204,9 +180,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         full_html = f"""
         {css}
         <div class="plugin-list">
-            <h3 class="plugin-section-header">System Plugins</h3>
-            <div id="system-plugin-list">{system_items_html}</div>
-            <h3 class="plugin-section-header">User Plugins (Drag to reorder tabs)</h3>
+            <h3 class="plugin-section-header">Installed Plugins (Drag to reorder tabs)</h3>
             <div id="user-plugin-list">{user_items_html}</div>
         </div>
         """
