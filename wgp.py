@@ -349,7 +349,7 @@ def edit_task_in_queue(
 
     if editing_task_index is None:
         gr.Warning("No task selected for editing.")
-        return update_queue_data(queue), gr.Tabs(selected="video_gen")
+        return None, gr.Tabs(selected="video_gen"), gr.update(visible=False)
 
     task_to_edit_index = editing_task_index + 1
     if task_to_edit_index >= len(queue):
@@ -8949,50 +8949,6 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 fn = fill_wizard_prompt, inputs = [state, wizard_prompt_activated_var, prompt, wizard_prompt], outputs = [ wizard_prompt_activated_var, wizard_variables_var, prompt, wizard_prompt, prompt_column_advanced, prompt_column_wizard, prompt_column_wizard_vars, *prompt_vars]
             )
 
-            if tab_id == 'edit':
-                edit_inputs_names = list(inspect.signature(edit_task_in_queue).parameters)[:-1]
-                edit_inputs_components = [locals_dict[k] for k in edit_inputs_names]
-                edit_btn.click(
-                    fn=validate_wizard_prompt,
-                    inputs=[state, wizard_prompt_activated_var, wizard_variables_var, prompt, wizard_prompt, *prompt_vars],
-                    outputs=[prompt]
-                ).then(
-                    fn=edit_task_in_queue,
-                    inputs=edit_inputs_components + [state],
-                    outputs=[js_trigger_index, main_tabs, edit_tab]
-                )
-                js_trigger_index.change(
-                    fn=None,
-                    inputs=[js_trigger_index],
-                    outputs=None,
-                    js="""
-                    (index) => {
-                        if (index === null || index < 0 || index === '') {
-                            return;
-                        }
-                        window.updateAndTrigger('silent_edit_' + index);
-                        setTimeout(() => {
-                            const silentCancelButton = document.querySelector('#silent_edit_tab_cancel_button');
-                            if (silentCancelButton) {
-                                silentCancelButton.click();
-                            }
-                        }, 50);
-                    }
-                    """
-                )
-
-                cancel_btn.click(
-                    fn=cancel_edit,
-                    inputs=[state],
-                    outputs=[main_tabs, edit_tab]
-                )
-
-                silent_cancel_btn.click(
-                    fn=silent_cancel_edit,
-                    inputs=[state],
-                    outputs=[main_tabs, js_trigger_index, edit_tab] # Also clears the trigger
-                )
-
             refresh_form_trigger.change(fn= fill_inputs, 
                 inputs=[state],
                 outputs=gen_inputs + extra_inputs,
@@ -9166,12 +9122,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                  outputs=[current_gen_column, queue_accordion]
             )
 
-    if tab_id == 'edit':
-        locals_dict = locals()
-        all_components_list = [locals_dict[k] for k in inputs_names] + [state, plugin_data] + extra_inputs
-        return all_components_list
-    else:
-        return locals()
+    return locals()
 
 def compact_name(family_name, model_name):
     if model_name.startswith(family_name):
@@ -10007,55 +9958,83 @@ def create_ui():
                     (state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger) = generator_tab_components['state'], generator_tab_components['loras_choices'], generator_tab_components['lset_name'], generator_tab_components['resolution'], generator_tab_components['refresh_form_trigger'], generator_tab_components['save_form_trigger']
             with gr.Tab("Edit", id="edit", visible=False) as edit_tab:
                 edit_title_md = gr.Markdown()
-                edit_tab_inputs = generate_video_tab(
-                    update_form=False, 
-                    state_dict=state.value, 
-                    ui_defaults=get_default_settings(transformer_type), 
-                    model_family=model_family, 
+                edit_tab_components = generate_video_tab(
+                    update_form=False,
+                    state_dict=state.value,
+                    ui_defaults=get_default_settings(transformer_type),
+                    model_family=model_family,
                     model_base_type_choice=model_base_type_choice,
-                    model_choice=model_choice, 
-                    header=header, 
-                    main=main, 
-                    main_tabs=main_tabs, 
+                    model_choice=model_choice,
+                    header=header,
+                    main=main,
+                    main_tabs=main_tabs,
                     tab_id='edit',
                     edit_tab=edit_tab
                 )
+
+                edit_tab_inputs = [edit_tab_components[k] for k in inputs_names] + [edit_tab_components['state'], edit_tab_components['plugin_data']] + edit_tab_components['extra_inputs']
+
                 def fill_inputs_for_edit(state):
                     editing_task_index = state.get("editing_task_index", None)
-                    if editing_task_index is None:
-                        return [gr.update()] + [gr.update()] * len(edit_tab_inputs)
+                    default_return = [gr.update()] * (1 + len(edit_tab_inputs))
+
+                    if editing_task_index is None: return default_return
 
                     gen = get_gen_info(state)
                     queue = gen.get("queue", [])
                     task_to_edit_index = editing_task_index + 1
-                    
                     if task_to_edit_index >= len(queue):
                         gr.Warning("Task to edit not found in queue.")
                         state["editing_task_index"] = None
-                        return [gr.update()] + [gr.update()] * len(edit_tab_inputs)
+                        return default_return
 
                     task = queue[task_to_edit_index]
                     ui_defaults = task['params'].copy()
                     
                     prompt_text = task.get('prompt', 'Unknown Prompt')[:80]
-                    edit_title_text = f"<div align='center'><h2 style=\"font-family: 'Segoe UI', Roboto, sans-serif;\">Editing <span style='color: #4A90E2; font-weight: 400; letter-spacing: 0.5px;'>'{prompt_text}'</span></h2></div>"
+                    edit_title_text = f"<div align='center'><h2>Editing '{prompt_text}...'</h2></div>"
 
-                    image_list_keys = ['image_start', 'image_end', 'image_refs']
-                    for key in image_list_keys:
-                        value = ui_defaults.get(key)
-                        if value is not None and not isinstance(value, list):
-                            ui_defaults[key] = [value]
+                    media_keys = ['image_start', 'image_end', 'image_refs']
+                    for key in media_keys:
+                        if key in ui_defaults and ui_defaults[key] is not None and not isinstance(ui_defaults[key], list):
+                            ui_defaults[key] = [ui_defaults[key]]
 
                     if ui_defaults.get('model_type') != state["model_type"]:
                         gr.Warning(f"Editing a task for a different model ({ui_defaults.get('model_type')}). Some settings may not apply.")
 
-                    return [edit_title_text] + generate_video_tab(update_form=True, state_dict=state, ui_defaults=ui_defaults)
+                    return [edit_title_text] + [ui_defaults.get(name, gr.update()) for name in inputs_names] + [gr.update(), gr.update()] + [gr.update()] * len(edit_tab_components['extra_inputs'])
+
+                edit_btn = edit_tab_components['edit_btn']
+                cancel_btn = edit_tab_components['cancel_btn']
+                silent_cancel_btn = edit_tab_components['silent_cancel_btn']
+                js_trigger_index = generator_tab_components['js_trigger_index']
+
+                edit_inputs_names = list(inspect.signature(edit_task_in_queue).parameters)
+                final_edit_inputs = [edit_tab_components[k] for k in edit_inputs_names if k != 'state'] + [state]
+                wizard_inputs = [state, edit_tab_components['wizard_prompt_activated_var'], edit_tab_components['wizard_variables_var'], edit_tab_components['prompt'], edit_tab_components['wizard_prompt']] + edit_tab_components['prompt_vars']
 
                 edit_tab.select(
                     fn=fill_inputs_for_edit,
                     inputs=[state],
                     outputs=[edit_title_md] + edit_tab_inputs
                 )
+                edit_btn.click(
+                    fn=validate_wizard_prompt,
+                    inputs=wizard_inputs,
+                    outputs=[edit_tab_components['prompt']]
+                ).then(
+                    fn=edit_task_in_queue,
+                    inputs=final_edit_inputs,
+                    outputs=[js_trigger_index, main_tabs, edit_tab]
+                )
+
+                js_trigger_index.change(
+                    fn=None, inputs=[js_trigger_index], outputs=None,
+                    js="(index) => { if (index !== null && index >= 0) { window.updateAndTrigger('silent_edit_' + index); setTimeout(() => { document.querySelector('#silent_edit_tab_cancel_button')?.click(); }, 50); } }"
+                )
+
+                cancel_btn.click(fn=cancel_edit, inputs=[state], outputs=[main_tabs, edit_tab])
+                silent_cancel_btn.click(fn=silent_cancel_edit, inputs=[state], outputs=[main_tabs, js_trigger_index, edit_tab])
             generator_tab_components['queue_action_trigger'].click(
                 fn=handle_queue_action,
                 inputs=[generator_tab_components['state'], generator_tab_components['queue_action_input']],
