@@ -273,7 +273,8 @@ class PluginManager:
                             if hook_name not in self.data_hooks:
                                 self.data_hooks[hook_name] = []
                             self.data_hooks[hook_name].extend(callbacks)
-                        print(f"Loaded plugin: {plugin.name} (from {plugin_dir_name})")
+                        if plugin_dir_name not in SYSTEM_PLUGINS:
+                            print(f"Loaded plugin: {plugin.name} (from {plugin_dir_name})")
                         break
             except Exception as e:
                 print(f"Error loading plugin from directory {plugin_dir_name}: {e}")
