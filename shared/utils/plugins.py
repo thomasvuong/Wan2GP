@@ -50,8 +50,9 @@ class WAN2GPPlugin:
         
     def add_tab(self, tab_id: str, label: str, component_constructor: callable, position: int = -1):
         self.tabs[tab_id] = PluginTab(id=tab_id, label=label, component_constructor=component_constructor, position=position)
-        if tab_id not in self.tab_ids:
-            self.tab_ids.append(tab_id)
+
+    def post_ui_setup(self, components: Dict[str, gr.components.Component]) -> Dict[gr.components.Component, Union[gr.update, Any]]:
+        return {}
 
     def on_tab_select(self, state: Dict[str, Any]) -> None:
         pass
@@ -323,6 +324,14 @@ class PluginManager:
         return data
 
     def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
+        if 'tab_state' not in all_components and 'main_tabs' in all_components:
+            main_tabs = all_components.get('main_tabs')
+            root_blocks = getattr(main_tabs, 'parent', None)
+            if root_blocks:
+                for component in getattr(root_blocks, 'children', []):
+                    if isinstance(component, gr.State):
+                        all_components['tab_state'] = component
+                        break
         all_insert_requests: List[InsertAfterRequest] = []
 
         for plugin_id, plugin in self.plugins.items():
@@ -337,9 +346,7 @@ class PluginManager:
                     if comp_id in all_components
                 }
                 plugin.post_ui_setup(requested_components)
-                if hasattr(plugin, '_insert_after_requests'):
-                    all_insert_requests.extend(plugin._insert_after_requests)
-                    plugin._insert_after_requests.clear()
+                all_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
                 
             except Exception as e:
                 print(f"[PluginManager] Error in post_ui_setup for {plugin_id}: {str(e)}")
@@ -351,7 +358,7 @@ class PluginManager:
                     target = all_components.get(request.target_component_id)
                     parent = getattr(target, 'parent', None)
                     if not target or not parent or not hasattr(parent, 'children'):
-                        print(f"[PluginManager] WARNING: Target '{request.target_component_id}' for insertion not found in the current UI tab context. Skipping.")
+                        print(f"[PluginManager] ERROR: Target '{request.target_component_id}' for insertion not found or invalid.")
                         continue
                         
                     target_index = parent.children.index(target)
@@ -384,11 +391,6 @@ class WAN2GPApplication:
             name: obj for name, obj in main_module_globals.items()
             if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion, gr.State))
         }
-        for plugin in self.plugin_manager.get_all_plugins().values():
-             for comp_id in plugin.component_requests:
-                if comp_id in early_components:
-                    setattr(plugin, comp_id, early_components[comp_id])
-        
         loaded_plugins = self.plugin_manager.get_all_plugins()
 
         system_tabs = []
@@ -419,9 +421,8 @@ class WAN2GPApplication:
         all_tabs_to_render = system_tabs + sorted_user_tabs
         
         for tab_info in all_tabs_to_render:
-            with gr.Tab(tab_info['label'], id=f"plugin_{tab_info['id']}") as rendered_tab:
+            with gr.Tab(tab_info['label'], id=f"plugin_{tab_info['id']}"):
                 tab_info['component_constructor']()
-                self.all_rendered_tabs.append(rendered_tab)
 
     def _handle_tab_selection(self, state: dict, selected_tab_id: str, evt: gr.SelectData): # Add this new method
         if not hasattr(self, 'previous_tab_id'):
@@ -430,7 +431,7 @@ class WAN2GPApplication:
         new_tab_id = evt.value
         
         if self.previous_tab_id == new_tab_id:
-            return
+            return new_tab_id
 
         if self.previous_tab_id and self.previous_tab_id in self.tab_to_plugin_map:
             plugin_to_deselect = self.tab_to_plugin_map[self.previous_tab_id]
@@ -451,25 +452,11 @@ class WAN2GPApplication:
         self.previous_tab_id = new_tab_id
         return new_tab_id
 
-    def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components_list: List[Dict[str, Any]]):
+    def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components: Dict[str, Any]):
         self._create_plugin_tabs(main_module_globals)
-
-        main_tabs = main_module_globals.get('main_tabs')
-        state = main_module_globals.get('state')
-        tab_state_id = gr.State(main_tabs.selected if main_tabs else None)
-
-        if main_tabs and state:
-             main_tabs.select(
-                self._handle_tab_selection, 
-                inputs=[state, tab_state_id], 
-                outputs=[tab_state_id],
-                show_progress="hidden"
-            )
-
-        for component_dict in all_ui_components_list:
-            if self.plugin_manager:
-                self.ui_components = {
-                    name: obj for name, obj in component_dict.items()
-                    if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
-                }
-                self.plugin_manager.run_post_ui_setup(self.ui_components)
+        self.ui_components = {
+            name: obj for name, obj in all_ui_components.items() 
+            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
+        }
+        if self.plugin_manager:
+            self.plugin_manager.run_post_ui_setup(self.ui_components)

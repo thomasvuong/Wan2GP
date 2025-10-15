@@ -9169,7 +9169,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
     if tab_id == 'edit':
         locals_dict = locals()
         gen_inputs = [locals_dict[k] for k in inputs_names] + [state] + extra_inputs
-        return gen_inputs, locals()
+        return gen_inputs
     else:
         return ( state, loras_choices, lset_name, resolution, refresh_form_trigger, save_form_trigger, locals(),
                 #  video_guide, image_guide, video_mask, image_mask, image_refs,   
@@ -10008,8 +10008,7 @@ def create_ui():
             if (path.some(hit)) e.stopImmediatePropagation();
         }, { capture: true, passive: true });
 
-        }    
-
+        }
     """
     if server_config.get("display_stats", 0) == 1:
         from shared.utils.stats import SystemStatsApp
@@ -10044,7 +10043,7 @@ def create_ui():
                     ) = generate_video_tab(model_family=model_family, model_base_type_choice= model_base_type_choice, model_choice=model_choice, header=header, main = main, main_tabs =main_tabs, tab_id='generate')
             with gr.Tab("Edit", id="edit") as edit_tab:
                 edit_title_md = gr.Markdown()
-                edit_tab_inputs, edit_tab_components = generate_video_tab(
+                edit_tab_inputs = generate_video_tab(
                     update_form=False, 
                     state_dict=state.value, 
                     ui_defaults=get_default_settings(transformer_type), 
@@ -10096,7 +10095,7 @@ def create_ui():
             globals()['refresh_form_trigger'] = refresh_form_trigger
             globals()['save_form_trigger'] = save_form_trigger
             globals()['state'] = state
-            app.finalize_ui_setup(globals(), [generator_tab_components, edit_tab_components])
+            app.finalize_ui_setup(globals(), generator_tab_components)
         if stats_app is not None:
             stats_app.setup_events(main, state)
         return main

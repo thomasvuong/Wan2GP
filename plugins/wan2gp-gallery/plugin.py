@@ -149,29 +149,69 @@ class GalleryPlugin(WAN2GPPlugin):
                     sliderContainer.addEventListener('touchend', handleInteractionEnd);
                 }
 
-                const observer = new MutationObserver((mutationsList) => {
-                    for(const mutation of mutationsList) {
-                        if (mutation.type === 'childList') {
-                            document.querySelectorAll('.video-joiner-player').forEach(player => {
-                                if (!player.dataset.initialized) {
-                                    const containerId = player.id;
-                                    const { sliderId, fps } = player.dataset;
-                                    if (containerId && sliderId && !isNaN(parseFloat(fps))) {
-                                        setupVideoFrameSeeker(containerId, sliderId, parseFloat(fps));
-                                        player.dataset.initialized = 'true';
-                                    }
+                function setupScopedObserver(observerName, rootSelector, targetSelector, callback) {
+                    if (!window.scopedObservers) {
+                        window.scopedObservers = new Map();
+                    }
+                    if (window.scopedObservers.has(observerName)) {
+                        return;
+                    }
+
+                    const startObserving = () => {
+                        const rootElement = document.querySelector(rootSelector);
+                        if (!rootElement) {
+                            // Retry if the root element isn't available yet (e.g., during Gradio startup).
+                            setTimeout(startObserving, 250);
+                            return;
+                        }
+
+                        const processNode = (node) => {
+                            if (node.matches && node.matches(targetSelector)) {
+                                callback(node);
+                            }
+                            if (node.querySelectorAll) {
+                                node.querySelectorAll(targetSelector).forEach(callback);
+                            }
+                        };
+
+                        processNode(rootElement);
+
+                        const observer = new MutationObserver((mutationsList) => {
+                            for (const mutation of mutationsList) {
+                                if (mutation.type === 'childList') {
+                                    mutation.addedNodes.forEach(processNode);
                                 }
-                            });
+                            }
+                        });
+
+                        observer.observe(rootElement, { childList: true, subtree: true });
+                        window.scopedObservers.set(observerName, observer);
+                    };
+                    
+                    startObserving();
+                }
+
+                setupScopedObserver(
+                    'GalleryVideoSeeker',
+                    '#gallery_tab_container',
+                    '.video-joiner-player',
+                    (playerNode) => {
+                        if (!playerNode.dataset.initialized) {
+                            const containerId = playerNode.id;
+                            const { sliderId, fps } = playerNode.dataset;
+                            if (containerId && sliderId && !isNaN(parseFloat(fps))) {
+                                setupVideoFrameSeeker(containerId, sliderId, parseFloat(fps));
+                                playerNode.dataset.initialized = 'true';
+                            }
                         }
                     }
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
+                );
             }
         """
         with gr.Blocks() as gallery_blocks:
             gr.HTML(value=f"<style>{css}</style>")
             gallery_blocks.load(fn=None, js=js)
-            with gr.Column():
+            with gr.Column(elem_id="gallery_tab_container"):
                 with gr.Row():
                     self.refresh_gallery_files_btn = gr.Button("Refresh Files")
                 with gr.Row(elem_id="gallery-layout"):

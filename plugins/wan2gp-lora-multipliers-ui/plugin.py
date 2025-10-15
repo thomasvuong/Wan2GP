@@ -1,5 +1,6 @@
 import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
+import time
 
 class LoraMultipliersUIPlugin(WAN2GPPlugin):
     def __init__(self):
@@ -142,43 +143,48 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         new_split_counts[triggered_lora_index] += 1
                 
                 current_split_counts = new_split_counts
-                ui_updates = []
+                
+                ui_updates = {}
                 all_slider_values_flat = []
+                
                 num_selected_loras = len(selected_lora_indices)
                 has_separator = separator_index != -1
                 show_accelerator_header = has_separator and separator_index > 0                
-                ui_updates.append(gr.update(visible=show_accelerator_header and num_selected_loras > 0))
-
+                ui_updates[accelerator_loras_header] = gr.update(visible=show_accelerator_header and num_selected_loras > 0)
+                
                 for i in range(MAX_LORA_SLIDERS):
+                    group_data = lora_slider_ui_groups[i]
+                    is_lora_visible = i < num_selected_loras
+                    
                     is_first_user_lora = (i == 0 and not show_accelerator_header) or (i == separator_index)
                     show_user_header_here = is_first_user_lora and num_selected_loras > i
-                    ui_updates.append(gr.update(visible=show_user_header_here))
-
-                    is_lora_visible = i < len(selected_lora_indices)
-                    ui_updates.append(gr.update(visible=is_lora_visible))
+                    ui_updates[group_data["user_header"]] = gr.update(visible=show_user_header_here)
                     
+                    ui_updates[group_data["main_group"]] = gr.update(visible=is_lora_visible)
+
                     if is_lora_visible:
                         lora_name = selected_lora_indices[i]
-                        ui_updates.append(gr.update(value=f"### {lora_name}"))
+                        ui_updates[group_data["name"]] = gr.update(value=f"### {lora_name}")
                         
                         num_splits_for_this_lora = current_split_counts[i]
                         steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
                         multipliers_per_step = steps_and_phases_str.split(',')
-
+                        
                         steps_per_split_base = total_steps
                         remainder = total_steps % num_splits_for_this_lora
                         start_step = 0
                         
                         for j in range(MAX_STEP_SPLITS):
+                            split_data = group_data["splits"][j]
                             is_split_visible = j < num_splits_for_this_lora
-                            ui_updates.append(gr.update(visible=is_split_visible))
+                            ui_updates[split_data["group"]] = gr.update(visible=is_split_visible)
 
                             if is_split_visible:
                                 steps_in_this_split = steps_per_split_base + (1 if j < remainder else 0)
                                 end_step = start_step + steps_in_this_split
                                 step_title = f"**Steps {start_step + 1} to {end_step}**"
                                 start_step = end_step
-                                ui_updates.append(gr.update(value=step_title))
+                                ui_updates[split_data["title"]] = gr.update(value=step_title)
                                 
                                 multipliers_per_phase = multipliers_per_step[j].split(';') if j < len(multipliers_per_step) else ['1.0'] * 3
                                 
@@ -187,24 +193,19 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                     except (ValueError, IndexError): phase_value = 1.0
                                     
                                     is_slider_visible = (k + 1) <= guidance_phases_val
-                                    ui_updates.append(gr.update(visible=is_slider_visible, value=phase_value))
+                                    ui_updates[split_data["sliders"][k]] = gr.update(visible=is_slider_visible, value=phase_value)
                                     all_slider_values_flat.append(phase_value)
                             else:
-                                ui_updates.extend([gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
                                 all_slider_values_flat.extend([1.0] * 3)
                     else:
-                        ui_updates.append(gr.update(value=""))
-                        for _ in range(MAX_STEP_SPLITS):
-                            ui_updates.extend([gr.update(visible=False), gr.update(value=""), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)])
                         all_slider_values_flat.extend([1.0] * 3 * MAX_STEP_SPLITS)
 
                 effective_separator_index = separator_index
-                if effective_separator_index != -1 and len(selected_lora_indices) < effective_separator_index:
+                if effective_separator_index != -1 and num_selected_loras < effective_separator_index:
                     effective_separator_index = -1
 
-                new_textbox_value = _build_multipliers_string(len(selected_lora_indices), guidance_phases_val, current_split_counts, all_slider_values_flat, effective_separator_index)
-                
-                return [effective_separator_index, current_split_counts, gr.update(value=new_textbox_value)] + ui_updates
+                new_textbox_value = _build_multipliers_string(num_selected_loras, guidance_phases_val, current_split_counts, all_slider_values_flat, effective_separator_index)
+                return [effective_separator_index, current_split_counts, gr.update(value=new_textbox_value), ui_updates]
 
             def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, separator_index, *all_slider_values_flat):
                 effective_separator_index = separator_index
@@ -248,30 +249,40 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                 "user_header": user_loras_header
                             })
 
-            slider_ui_outputs = []
+            slider_ui_outputs_flat = []
             all_sliders_flat = []
-            slider_ui_outputs.append(accelerator_loras_header)
+            slider_ui_outputs_flat.append(accelerator_loras_header)
             for group in lora_slider_ui_groups:
-                slider_ui_outputs.append(group["user_header"])
-                slider_ui_outputs.extend([group["main_group"], group["name"]])
+                slider_ui_outputs_flat.append(group["user_header"])
+                slider_ui_outputs_flat.extend([group["main_group"], group["name"]])
                 for split in group["splits"]:
-                    slider_ui_outputs.extend([split["group"], split["title"], *split["sliders"]])
+                    slider_ui_outputs_flat.extend([split["group"], split["title"], *split["sliders"]])
                     all_sliders_flat.extend(split["sliders"])
 
-            events_to_trigger_ui_update = [loras_choices.change, guidance_phases.change, num_inference_steps.change, loras_multipliers.change]
+            def unpack_dict_updates_fn(*args, **kwargs):
+                state_outs_and_dict = update_slider_ui_and_textbox(*args, **kwargs)
+                states = state_outs_and_dict[:-1]
+                updates_dict = state_outs_and_dict[-1]
+
+                unpacked_list = []
+                for component in slider_ui_outputs_flat:
+                    unpacked_list.append(updates_dict.get(component, gr.update()))
+                return states + unpacked_list
+
+            events_to_trigger_ui_update = [loras_choices.change, guidance_phases.change, num_inference_steps.change, loras_multipliers.blur]
             for event in events_to_trigger_ui_update:
                 event(
-                    fn=update_slider_ui_and_textbox,
+                    fn=unpack_dict_updates_fn,
                     inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
-                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                     show_progress="hidden"
                 )
 
             for i, group in enumerate(lora_slider_ui_groups):
                 group["split_button"].click(
-                    fn=update_slider_ui_and_textbox,
+                    fn=unpack_dict_updates_fn,
                     inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(i)],
-                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                     show_progress="hidden"
                 )
 
@@ -283,12 +294,29 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             )
 
             for slider in all_sliders_flat:
-                slider.release(fn=None, js="() => { document.getElementById('lora_mults_update_btn').click() }")
+                slider.release(fn=None, js="""
+                    () => {
+                        if (!window.wgpLoraUIDebouncedUpdate) {
+                            const debounce = (func, delay) => {
+                                let timeout;
+                                return (...args) => {
+                                    clearTimeout(timeout);
+                                    timeout = setTimeout(() => func.apply(this, args), delay);
+                                };
+                            };
+                            window.wgpLoraUIDebouncedUpdate = debounce(() => {
+                                const btn = document.getElementById('lora_mults_update_btn');
+                                if (btn) btn.click();
+                            }, 200);
+                        }
+                        window.wgpLoraUIDebouncedUpdate();
+                    }
+                """)
 
             main_ui_block.load(
-                fn=update_slider_ui_and_textbox,
+                fn=unpack_dict_updates_fn,
                 inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts],
-                outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs,
+                outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
                 show_progress="hidden"
             )
 
