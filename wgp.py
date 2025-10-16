@@ -8229,10 +8229,10 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 prompt_enhancer_btn = gr.Button( value ="Enhance Prompt", visible= on_demand_prompt_enhancer, size="lg",  elem_classes="btn_centered")
                 prompt_enhancer_choices= ([] if on_demand_prompt_enhancer else [("Disabled", "")]) +  [("Based on Text Prompt Content", "T")]
                 if not audio_only:
-                        prompt_enhancer_choices += [
+                    prompt_enhancer_choices += [
                         ("Based on Images Prompts Content (such as Start Image and Reference Images)", "I"),
                         ("Based on both Text Prompt and Images Prompts Content", "TI"),
-                    ],
+                    ]
 
                 prompt_enhancer = gr.Dropdown(
                     choices=prompt_enhancer_choices,
