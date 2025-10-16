@@ -126,7 +126,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         for plugin_id in enabled_user_plugins:
             if plugin_id in user_plugins_map:
                 user_plugins.append(user_plugins_map.pop(plugin_id))
-        user_plugins.extend(user_plugins_map.values()) # Add remaining (disabled) plugins
+        user_plugins.extend(user_plugins_map.values())
 
         user_items_html = ""
         for plugin in user_plugins:
@@ -159,7 +159,6 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             .plugin-item:hover { box-shadow: var(--shadow-drop-lg); }
             .plugin-item[draggable="true"] { cursor: grab; }
             .plugin-item[draggable="true"]:active { cursor: grabbing; }
-            .plugin-section-header { margin-bottom: 10px; font-size: 1.2em; font-weight: bold; color: var(--text-color-primary); border-bottom: 1px solid var(--border-color-primary); padding-bottom: 5px; }
             .plugin-info-container { display: flex; align-items: center; gap: 16px; flex-grow: 1; }
             .plugin-item-info { display: flex; flex-direction: column; gap: 4px; }
             .plugin-item-info .name { font-weight: 600; font-size: 1.1em; color: var(--text-color-primary); font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif; }
@@ -180,7 +179,6 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         full_html = f"""
         {css}
         <div class="plugin-list">
-            <h3 class="plugin-section-header">Installed Plugins (Drag to reorder tabs)</h3>
             <div id="user-plugin-list">{user_items_html}</div>
         </div>
         """
@@ -190,6 +188,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         with gr.Blocks() as plugin_blocks:
             with gr.Row(equal_height=False, variant='panel'):
                 with gr.Column(scale=2, min_width=600):
+                    gr.Markdown("### Installed Plugins (Drag to reorder tabs)")
                     self.plugins_html_display = gr.HTML(self._build_plugins_html)
                     with gr.Row(elem_classes="save-buttons-container"):
                         self.save_plugins_button = gr.Button("Save", variant="secondary", size="sm", scale=0, elem_classes="stylish-save-btn")
