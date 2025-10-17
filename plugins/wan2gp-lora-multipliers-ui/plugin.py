@@ -194,18 +194,26 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         if (!data) return;
                         const container = document.getElementById('{container_id}');
                         if (!container) return;
-                        container.innerHTML = ''; 
+                        
+                        container.innerHTML = '';
                         window.wgp_guidance_phases_{tab_id} = data.guidance_phases;
                         window.wgp_total_steps_{tab_id} = data.total_steps;
                         container.dataset.separatorIndex = data.separator_index;
 
+                        const createHeader = (text) => {{
+                            const headerDiv = document.createElement('div');
+                            headerDiv.className = 'lora-section-header';
+                            headerDiv.innerHTML = `<h3>${{text}}</h3>`;
+                            return headerDiv;
+                        }};
+
                         if(data.separator_index > 0 && data.loras.length > 0) {{
-                            container.innerHTML += '<div class="lora-section-header"><h3>Accelerator LoRAs</h3></div>';
+                            container.appendChild(createHeader('Accelerator LoRAs'));
                         }}
 
                         data.loras.forEach((lora, i) => {{
                             if ((data.separator_index === -1 && i === 0) || data.separator_index === i) {{
-                               container.innerHTML += '<div class="lora-section-header"><h3>User LoRAs</h3></div>';
+                               container.appendChild(createHeader('User LoRAs'));
                             }}
                             const loraContainer = document.createElement('div');
                             loraContainer.className = 'lora-main-container';
