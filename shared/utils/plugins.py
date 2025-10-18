@@ -44,6 +44,7 @@ class WAN2GPPlugin:
         self._setup_complete = False
         self._data_hooks: Dict[str, List[callable]] = {}
         self.tab_ids: List[str] = []
+        self.target_tabs: Optional[List[str]] = None
         
     def setup_ui(self) -> None:
         pass
@@ -90,9 +91,6 @@ class WAN2GPPlugin:
                 new_component_constructor=new_component_constructor
             )
         )
-        
-    def post_ui_setup(self, components: Dict[str, gr.components.Component]) -> Dict[gr.components.Component, Union[gr.update, Any]]:
-        return {}
 
 class PluginManager:
     def __init__(self, plugins_dir="plugins"):
@@ -262,7 +260,12 @@ class PluginManager:
             if plugin_dir_name not in plugins_to_load:
                 continue
             try:
-                module = importlib.import_module(f"{plugin_dir_name}.plugin")
+                # Reload the module to pick up code changes without restarting the whole app
+                module_name = f"{plugin_dir_name}.plugin"
+                if module_name in sys.modules:
+                    importlib.reload(sys.modules[module_name])
+                
+                module = importlib.import_module(module_name)
 
                 for name, obj in inspect.getmembers(module, inspect.isclass):
                     if issubclass(obj, WAN2GPPlugin) and obj != WAN2GPPlugin:
@@ -324,61 +327,75 @@ class PluginManager:
                 traceback.print_exc()
         return data
 
-    def run_post_ui_setup(self, all_components: Dict[str, gr.components.Component]) -> None:
-        if 'tab_state' not in all_components and 'main_tabs' in all_components:
-            main_tabs = all_components.get('main_tabs')
-            root_blocks = getattr(main_tabs, 'parent', None)
-            if root_blocks:
-                for component in getattr(root_blocks, 'children', []):
-                    if isinstance(component, gr.State):
-                        all_components['tab_state'] = component
-                        break
-        all_insert_requests: List[InsertAfterRequest] = []
+    def run_post_ui_setup(self, all_tab_components: List[Dict[str, Any]]) -> None:
+        for tab_components in all_tab_components:
+            tab_id = tab_components.get('__tab_id__')
+            if not tab_id:
+                print("[PluginManager] WARNING: A tab component dictionary is missing '__tab_id__'. Skipping.")
+                continue
 
-        for plugin_id, plugin in self.plugins.items():
-            try:
-                for comp_id in plugin.component_requests:
-                    if comp_id in all_components:
-                        setattr(plugin, comp_id, all_components[comp_id])
+            tab_insert_requests: List[InsertAfterRequest] = []
 
-                requested_components = {
-                    comp_id: all_components[comp_id]
-                    for comp_id in plugin.component_requests
-                    if comp_id in all_components
-                }
-                plugin.post_ui_setup(requested_components)
-                all_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
+            for plugin_id, plugin in self.plugins.items():
+                target_tabs = getattr(plugin, 'target_tabs', None)
+                if target_tabs is not None and tab_id not in target_tabs:
+                    continue
+
+                if not all(comp_id in tab_components for comp_id in plugin.component_requests):
+                    continue
                 
-            except Exception as e:
-                print(f"[PluginManager] Error in post_ui_setup for {plugin_id}: {str(e)}")
-                traceback.print_exc()
-
-        if all_insert_requests:
-            for request in all_insert_requests:
+                original_attrs = {}
                 try:
-                    target = all_components.get(request.target_component_id)
-                    parent = getattr(target, 'parent', None)
-                    if not target or not parent or not hasattr(parent, 'children'):
-                        print(f"[PluginManager] ERROR: Target '{request.target_component_id}' for insertion not found or invalid.")
-                        continue
-                        
-                    target_index = parent.children.index(target)
-                    with parent:
-                        new_component = request.new_component_constructor()
-                    
-                    newly_added = parent.children.pop(-1)
-                    parent.children.insert(target_index + 1, newly_added)
-                    print(f"[PluginManager] Successfully inserted component after '{request.target_component_id}'")
+                    # Temporarily set attributes for the current tab's context
+                    for comp_id in plugin.component_requests:
+                        if hasattr(plugin, comp_id):
+                            original_attrs[comp_id] = getattr(plugin, comp_id)
+                        setattr(plugin, comp_id, tab_components[comp_id])
 
+                    requested_components = { comp_id: tab_components[comp_id] for comp_id in plugin.component_requests }
+                    requested_components['__tab_id__'] = tab_id
+                    
+                    plugin._insert_after_requests = []
+                    plugin.post_ui_setup(requested_components)
+                    tab_insert_requests.extend(getattr(plugin, '_insert_after_requests', []))
+                    
                 except Exception as e:
-                    print(f"[PluginManager] Error processing insert_after for {request.target_component_id}: {str(e)}")
+                    print(f"[PluginManager] Error in post_ui_setup for {plugin_id} on tab '{tab_id}': {str(e)}")
+                    traceback.print_exc()
+                finally:
+                    # Clean up attributes to prevent state leakage
+                    for comp_id in plugin.component_requests:
+                        if hasattr(plugin, comp_id):
+                            delattr(plugin, comp_id)
+                    # Restore any original attributes that were overwritten
+                    for comp_id, value in original_attrs.items():
+                        setattr(plugin, comp_id, value)
+
+            if tab_insert_requests:
+                for request in tab_insert_requests:
+                    try:
+                        target = tab_components.get(request.target_component_id)
+                        parent = getattr(target, 'parent', None)
+                        if not target or not parent or not hasattr(parent, 'children'):
+                            print(f"[PluginManager] ERROR on tab '{tab_id}': Target '{request.target_component_id}' for insertion not found or invalid.")
+                            continue
+                            
+                        target_index = parent.children.index(target)
+                        with parent:
+                            new_component = request.new_component_constructor()
+                        
+                        newly_added = parent.children.pop(-1)
+                        parent.children.insert(target_index + 1, newly_added)
+                        print(f"[PluginManager] Successfully inserted component after '{request.target_component_id}' on tab '{tab_id}'")
+
+                    except Exception as e:
+                        print(f"[PluginManager] Error processing insert_after for {request.target_component_id} on tab '{tab_id}': {str(e)}")
+
 
 class WAN2GPApplication:
     def __init__(self):
         self.plugin_manager = PluginManager()
-        self.ui_components = {}
         self.tab_to_plugin_map: Dict[str, WAN2GPPlugin] = {}
-        self.all_rendered_tabs: List[gr.Tab] = []
 
     def _create_plugin_tabs(self, main_module_globals: Dict[str, Any]):
         if not self.plugin_manager:
@@ -388,10 +405,7 @@ class WAN2GPApplication:
         
         self.plugin_manager.load_plugins_from_directory(enabled_user_plugins)
         self.plugin_manager.inject_globals(main_module_globals)
-        early_components = {
-            name: obj for name, obj in main_module_globals.items()
-            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion, gr.State))
-        }
+
         loaded_plugins = self.plugin_manager.get_all_plugins()
 
         system_tabs = []
@@ -425,14 +439,14 @@ class WAN2GPApplication:
             with gr.Tab(tab_info['label'], id=f"plugin_{tab_info['id']}"):
                 tab_info['component_constructor']()
 
-    def _handle_tab_selection(self, state: dict, selected_tab_id: str, evt: gr.SelectData): # Add this new method
+    def _handle_tab_selection(self, state: dict, evt: gr.SelectData):
         if not hasattr(self, 'previous_tab_id'):
             self.previous_tab_id = None
         
         new_tab_id = evt.value
         
         if self.previous_tab_id == new_tab_id:
-            return new_tab_id
+            return
 
         if self.previous_tab_id and self.previous_tab_id in self.tab_to_plugin_map:
             plugin_to_deselect = self.tab_to_plugin_map[self.previous_tab_id]
@@ -451,13 +465,19 @@ class WAN2GPApplication:
                 traceback.print_exc()
 
         self.previous_tab_id = new_tab_id
-        return new_tab_id
 
-    def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_ui_components: Dict[str, Any]):
+    def finalize_ui_setup(self, main_module_globals: Dict[str, Any], all_tab_components: List[Dict[str, Any]]):
         self._create_plugin_tabs(main_module_globals)
-        self.ui_components = {
-            name: obj for name, obj in all_ui_components.items() 
-            if isinstance(obj, (gr.Blocks, gr.components.Component, gr.Row, gr.Column, gr.Tabs, gr.Group, gr.Accordion))
-        }
+        
+        main_tabs = main_module_globals.get('main_tabs')
+        state = main_module_globals.get('state')
+        if main_tabs and state:
+             main_tabs.select(
+                self._handle_tab_selection, 
+                inputs=[state], 
+                outputs=None,
+                show_progress="hidden"
+            )
+            
         if self.plugin_manager:
-            self.plugin_manager.run_post_ui_setup(self.ui_components)
+            self.plugin_manager.run_post_ui_setup(all_tab_components)

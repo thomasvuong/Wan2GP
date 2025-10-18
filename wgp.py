@@ -9355,7 +9355,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                  inputs=None,
                  outputs=[current_gen_column, queue_accordion]
             )
-
+    locals()['__tab_id__'] = tab_id
     return locals()
 
 def compact_name(family_name, model_name):
@@ -10272,6 +10272,7 @@ def create_ui():
 
                 cancel_btn.click(fn=cancel_edit, inputs=[state], outputs=[main_tabs, edit_tab])
                 silent_cancel_btn.click(fn=silent_cancel_edit, inputs=[state], outputs=[main_tabs, js_trigger_index, edit_tab])
+
             generator_tab_components['queue_action_trigger'].click(
                 fn=handle_queue_action,
                 inputs=[generator_tab_components['state'], generator_tab_components['queue_action_input']],

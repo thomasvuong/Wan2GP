@@ -1,352 +1,362 @@
 import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
-import time
+import json
+import traceback
 
 class LoraMultipliersUIPlugin(WAN2GPPlugin):
     def __init__(self):
         super().__init__()
         self.name = "Lora Multipliers UI"
-        self.version = "1.0.0"
-        self.description = "Dynamically set lora multipliers with slider bars instead of text"
+        self.version = "1.0.9"
+        self.description = "Dynamically set lora multipliers with a fast, JavaScript-powered UI."
+        self.target_tabs = ['generate', 'edit']
         self.request_component("loras_multipliers")
         self.request_component("loras_choices")
         self.request_component("guidance_phases")
         self.request_component("num_inference_steps")
         self.request_component("main")
+        self.previous_loras_state = {}
 
     def post_ui_setup(self, components: dict) -> dict:
-        loras_multipliers = self.loras_multipliers
-        loras_choices = self.loras_choices
-        guidance_phases = self.guidance_phases
-        num_inference_steps = self.num_inference_steps
-        main_ui_block = self.main
-
-        def create_and_wire_ui():
-            MAX_LORA_SLIDERS = 15
-            MAX_STEP_SPLITS = 5
-
-            css = """
-            <style>
-                #lora_builder_main_group {
-                    font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
-                }
-                .lora-main-container {
-                    border: 1px solid var(--border-color-primary);
-                    border-radius: 8px;
-                    padding: 12px;
-                    margin-bottom: 0px !important;
-                    background-color: var(--background-fill-secondary);
-                }
-                .lora-main-container > .gr-row {
-                    margin-bottom: 8px;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                .lora-step-split-container {
-                    border: 1px dashed var(--border-color-accent);
-                    border-radius: 6px;
-                    padding: 10px;
-                    margin-top: 8px;
-                }
-                .lora-main-container button {
-                    padding: 4px 12px !important;
-                    font-size: 1em !important;
-                    min-width: fit-content !important;
-                    flex-grow: 0;
-                    background: var(--button-secondary-background-fill);
-                    color: var(--button-secondary-text-color);
-                    border: 1px solid var(--button-secondary-border-color);
-                }
-                .lora-main-container button:hover {
-                    background: var(--button-secondary-background-fill-hover);
-                    border-color: var(--button-secondary-border-color-hover);
-                }
-                .lora-step-split-container > .gr-row {
-                    gap: 16px;
-                    align-items: end; 
-                }
-                .lora-step-split-container .form {
-                    flex-grow: 1;
-                }
-                .lora-section-header h3 {
-                    border-bottom: 1px solid var(--border-color-primary);
-                    padding-bottom: 4px;
-                    margin-top: 16px;
-                    margin-bottom: 0px;
-                }
-                #lora_builder_main_group > div:first-child > h3 {
-                    margin-top: 0;
-                }
-            </style>
-            """
-
-            def _build_multipliers_string(num_selected_loras, guidance_phases_val, split_counts, all_slider_values_flat, separator_index=-1):
-                textbox_strings = []
-                slider_cursor = 0
-                for i in range(MAX_LORA_SLIDERS):
-                    if i < num_selected_loras:
-                        num_splits_for_this_lora = split_counts[i]
-                        lora_step_strings = []
-                        for j in range(MAX_STEP_SPLITS):
-                            phase_values_for_textbox = []
-                            if j < num_splits_for_this_lora:
-                                for k in range(3):
-                                    is_visible = (k + 1) <= guidance_phases_val
-                                    if is_visible:
-                                        phase_value = all_slider_values_flat[slider_cursor + k]
-                                        formatted_value = str(int(phase_value)) if phase_value == int(phase_value) else f"{phase_value:.2f}".rstrip('0').rstrip('.')
-                                        phase_values_for_textbox.append(formatted_value)
-                            
-                            if phase_values_for_textbox:
-                                lora_step_strings.append(";".join(phase_values_for_textbox))
-                            slider_cursor += 3
-                        
-                        if lora_step_strings:
-                            textbox_strings.append(",".join(lora_step_strings))
-                    else:
-                        slider_cursor += MAX_STEP_SPLITS * 3
-                
-                if not textbox_strings:
-                    return ""
-
-                if separator_index != -1 and num_selected_loras < separator_index:
-                    separator_index = -1
-
-                if separator_index > 0 and separator_index <= len(textbox_strings):
-                    part1 = " ".join(textbox_strings[:separator_index])
-                    part2 = " ".join(textbox_strings[separator_index:])
-                    if part2:
-                        return f"{part1}|{part2}"
-                    else:
-                        return f"{part1}|"
-                else:
-                    return " ".join(textbox_strings)
-
-            def update_slider_ui_and_textbox(selected_lora_indices, guidance_phases_val, current_multipliers_str, total_steps, current_split_counts_state, split_lora_index=-1, rejoin_lora_index=-1):
-                multipliers_per_lora = []
-                separator_index = -1
-                if current_multipliers_str:
-                    if '|' in current_multipliers_str:
-                        parts = current_multipliers_str.split('|')
-                        loras_before_sep = [s for s in parts[0].split(' ') if s]
-                        separator_index = len(loras_before_sep)
-                    multipliers_per_lora = [s for s in current_multipliers_str.replace('|', ' ').split(' ') if s]
-
-                new_split_counts = list(current_split_counts_state)
-
-                if split_lora_index == -1 and rejoin_lora_index == -1:
-                    for i in range(len(multipliers_per_lora)):
-                        if i < MAX_LORA_SLIDERS:
-                            num_splits = len(multipliers_per_lora[i].split(','))
-                            new_split_counts[i] = max(1, num_splits)
-
-                if split_lora_index != -1:
-                    if new_split_counts[split_lora_index] < MAX_STEP_SPLITS:
-                        new_split_counts[split_lora_index] += 1
-                elif rejoin_lora_index != -1:
-                    if new_split_counts[rejoin_lora_index] > 1:
-                        new_split_counts[rejoin_lora_index] -= 1 # Decrement instead of resetting
-                
-                current_split_counts = new_split_counts
-                
-                ui_updates = {}
-                all_slider_values_flat = []
-                
-                num_selected_loras = len(selected_lora_indices)
-                has_separator = separator_index != -1
-                show_accelerator_header = has_separator and separator_index > 0                
-                ui_updates[accelerator_loras_header] = gr.update(visible=show_accelerator_header and num_selected_loras > 0)
-                
-                for i in range(MAX_LORA_SLIDERS):
-                    group_data = lora_slider_ui_groups[i]
-                    is_lora_visible = i < num_selected_loras
-                    
-                    is_first_user_lora = (i == 0 and not show_accelerator_header) or (i == separator_index)
-                    show_user_header_here = is_first_user_lora and num_selected_loras > i
-                    ui_updates[group_data["user_header"]] = gr.update(visible=show_user_header_here)
-                    
-                    ui_updates[group_data["main_group"]] = gr.update(visible=is_lora_visible)
-
-                    if is_lora_visible:
-                        lora_name = selected_lora_indices[i]
-                        ui_updates[group_data["name"]] = gr.update(value=f"### {lora_name}")
-                        
-                        num_splits_for_this_lora = current_split_counts[i]
-                        
-                        ui_updates[group_data["split_button"]] = gr.update(visible=(num_splits_for_this_lora < MAX_STEP_SPLITS))
-                        ui_updates[group_data["rejoin_button"]] = gr.update(visible=(num_splits_for_this_lora > 1))
-                        
-                        steps_and_phases_str = multipliers_per_lora[i] if i < len(multipliers_per_lora) else ""
-                        multipliers_per_step = steps_and_phases_str.split(',')
-                        
-                        steps_per_split_base = total_steps
-                        remainder = total_steps % num_splits_for_this_lora
-                        start_step = 0
-                        
-                        for j in range(MAX_STEP_SPLITS):
-                            split_data = group_data["splits"][j]
-                            is_split_visible = j < num_splits_for_this_lora
-                            ui_updates[split_data["group"]] = gr.update(visible=is_split_visible)
-
-                            if is_split_visible:
-                                steps_in_this_split = steps_per_split_base + (1 if j < remainder else 0)
-                                end_step = start_step + steps_in_this_split
-                                step_title = f"**Steps {start_step + 1} to {end_step}**"
-                                start_step = end_step
-                                ui_updates[split_data["title"]] = gr.update(value=step_title)
-                                
-                                multipliers_per_phase = multipliers_per_step[j].split(';') if j < len(multipliers_per_step) else ['1.0'] * 3
-                                
-                                for k in range(3):
-                                    try: phase_value = float(multipliers_per_phase[k])
-                                    except (ValueError, IndexError): phase_value = 1.0
-                                    
-                                    is_slider_visible = (k + 1) <= guidance_phases_val
-                                    ui_updates[split_data["sliders"][k]] = gr.update(visible=is_slider_visible, value=phase_value)
-                                    all_slider_values_flat.append(phase_value)
-                            else:
-                                all_slider_values_flat.extend([1.0] * 3)
-                    else:
-                        ui_updates[group_data["split_button"]] = gr.update(visible=False)
-                        ui_updates[group_data["rejoin_button"]] = gr.update(visible=False)
-                        all_slider_values_flat.extend([1.0] * 3 * MAX_STEP_SPLITS)
-
-                effective_separator_index = separator_index
-                if effective_separator_index != -1 and num_selected_loras < effective_separator_index:
-                    effective_separator_index = -1
-
-                new_textbox_value = _build_multipliers_string(num_selected_loras, guidance_phases_val, current_split_counts, all_slider_values_flat, effective_separator_index)
-                return [effective_separator_index, current_split_counts, gr.update(value=new_textbox_value), ui_updates]
-
-            def update_textbox_from_sliders(selected_loras, guidance_phases_val, split_counts, separator_index, *all_slider_values_flat):
-                effective_separator_index = separator_index
-                if effective_separator_index != -1 and len(selected_loras) < effective_separator_index:
-                    effective_separator_index = -1
-                new_textbox_value = _build_multipliers_string(len(selected_loras), guidance_phases_val, split_counts, all_slider_values_flat, effective_separator_index)
-                return gr.update(value=new_textbox_value)
-
-            with gr.Accordion("Dynamic Lora Multipliers Adjustments", open=True) as main_accordion:
-                gr.HTML(value=css)
-                lora_separator_index = gr.State(-1)
-                lora_split_counts = gr.State([1] * MAX_LORA_SLIDERS)
-                lora_slider_ui_groups = []
-
-                update_mults_btn = gr.Button(visible=False, elem_id="lora_mults_update_btn")
-
-                with gr.Group(elem_id="lora_builder_main_group"):
-                    accelerator_loras_header = gr.Markdown("<h3>Accelerator LoRAs</h3>", visible=False, elem_classes="lora-section-header")
-                    for i in range(MAX_LORA_SLIDERS):
-                        user_loras_header = gr.Markdown("<h3>User LoRAs</h3>", visible=False, elem_classes="lora-section-header")
-                        with gr.Column(visible=False, elem_classes="lora-main-container") as lora_main_group:
-                            with gr.Row(variant="compact"):
-                                lora_name_md = gr.Markdown()
-                                with gr.Row():
-                                    split_steps_btn = gr.Button("Split Steps")
-                                    rejoin_steps_btn = gr.Button("Rejoin Step", visible=False)
-                            
-                            split_groups = []
-                            for j in range(MAX_STEP_SPLITS):
-                                with gr.Column(visible=False, elem_classes="lora-step-split-container") as lora_step_group:
-                                    step_range_md = gr.Markdown()
-                                    with gr.Row():
-                                        phase1_slider = gr.Slider(minimum=0.0, maximum=1.0, value=1.0, step=0.05, label="Phase 1", interactive=True)
-                                        phase2_slider = gr.Slider(minimum=0.0, maximum=1.0, value=1.0, step=0.05, label="Phase 2", interactive=True, visible=False)
-                                        phase3_slider = gr.Slider(minimum=0.0, maximum=1.0, value=1.0, step=0.05, label="Phase 3", interactive=True, visible=False)
-                                    split_groups.append({ "group": lora_step_group, "title": step_range_md, "sliders": [phase1_slider, phase2_slider, phase3_slider] })
-                            
-                            lora_slider_ui_groups.append({ 
-                                "main_group": lora_main_group, 
-                                "name": lora_name_md, 
-                                "split_button": split_steps_btn, 
-                                "rejoin_button": rejoin_steps_btn,
-                                "splits": split_groups,
-                                "user_header": user_loras_header
-                            })
-
-            slider_ui_outputs_flat = []
-            all_sliders_flat = []
-            slider_ui_outputs_flat.append(accelerator_loras_header)
-            for group in lora_slider_ui_groups:
-                slider_ui_outputs_flat.append(group["user_header"])
-                slider_ui_outputs_flat.extend([group["main_group"], group["name"], group["split_button"], group["rejoin_button"]])
-                for split in group["splits"]:
-                    slider_ui_outputs_flat.extend([split["group"], split["title"], *split["sliders"]])
-                    all_sliders_flat.extend(split["sliders"])
-
-            def unpack_dict_updates_fn(*args, **kwargs):
-                state_outs_and_dict = update_slider_ui_and_textbox(*args, **kwargs)
-                states = state_outs_and_dict[:-1]
-                updates_dict = state_outs_and_dict[-1]
-
-                unpacked_list = []
-                for component in slider_ui_outputs_flat:
-                    unpacked_list.append(updates_dict.get(component, gr.update()))
-                return states + unpacked_list
-
-            events_to_trigger_ui_update = [loras_choices.change, guidance_phases.change, num_inference_steps.change, loras_multipliers.blur]
-            for event in events_to_trigger_ui_update:
-                event(
-                    fn=unpack_dict_updates_fn,
-                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(-1)],
-                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
-                    show_progress="hidden"
-                )
-
-            for i, group in enumerate(lora_slider_ui_groups):
-                group["split_button"].click(
-                    fn=unpack_dict_updates_fn,
-                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(i), gr.State(-1)],
-                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
-                    show_progress="hidden"
-                )
-                group["rejoin_button"].click(
-                    fn=unpack_dict_updates_fn,
-                    inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(i)],
-                    outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
-                    show_progress="hidden"
-                )
-
-            update_mults_btn.click(
-                fn=update_textbox_from_sliders,
-                inputs=[loras_choices, guidance_phases, lora_split_counts, lora_separator_index] + all_sliders_flat,
-                outputs=[loras_multipliers],
-                show_progress="hidden"
-            )
-
-            for slider in all_sliders_flat:
-                slider.release(fn=None, js="""
-                    () => {
-                        if (!window.wgpLoraUIDebouncedUpdate) {
-                            const debounce = (func, delay) => {
-                                let timeout;
-                                return (...args) => {
-                                    clearTimeout(timeout);
-                                    timeout = setTimeout(() => func.apply(this, args), delay);
-                                };
-                            };
-                            window.wgpLoraUIDebouncedUpdate = debounce(() => {
-                                const btn = document.getElementById('lora_mults_update_btn');
-                                if (btn) btn.click();
-                            }, 200);
-                        }
-                        window.wgpLoraUIDebouncedUpdate();
-                    }
-                """)
-
-            main_ui_block.load(
-                fn=unpack_dict_updates_fn,
-                inputs=[loras_choices, guidance_phases, loras_multipliers, num_inference_steps, lora_split_counts, gr.State(-1), gr.State(-1)],
-                outputs=[lora_separator_index, lora_split_counts, loras_multipliers] + slider_ui_outputs_flat,
-                show_progress="hidden"
-            )
-
-            return main_accordion
-
-        self.insert_after(
-            target_component_id="loras_multipliers",
-            new_component_constructor=create_and_wire_ui
-        )
+        tab_id = components.get('__tab_id__', 'unknown_tab')
+        if tab_id not in self.previous_loras_state:
+            self.previous_loras_state[tab_id] = {'loras': [], 'accelerators': []}
         
-        return {
-            loras_multipliers: gr.update(elem_id="loras_multipliers_textbox", interactive=True)
-        }
+        try:
+            loras_multipliers = components["loras_multipliers"]
+            loras_choices = components["loras_choices"]
+            guidance_phases = components["guidance_phases"]
+            num_inference_steps = components["num_inference_steps"]
+            main_ui_block = components["main"]
+
+            def create_and_wire_ui():
+                container_id = f"lora_multiplier_ui_container_{tab_id}"
+                update_btn_id = f"lora_mults_update_btn_{tab_id}"
+                hidden_input_id = f"lora_mults_hidden_input_{tab_id}"
+                js_renderer_func = f"wgpLoraUIRenderer_{tab_id}"
+                
+                css = f"""
+                <style>
+                    #{container_id} {{ font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif; }}
+                    .lora-main-container {{ border: 1px solid var(--border-color-primary); border-radius: 8px; padding: 12px; margin-bottom: 8px !important; background-color: var(--background-fill-secondary); }}
+                    .lora-main-container .gr-row {{ margin-bottom: 8px; justify-content: space-between; align-items: center; }}
+                    .lora-main-container .gr-row h3 {{ margin-top: 0; margin-bottom: 10;}}
+                    .lora-step-split-container {{ border: 1px dashed var(--border-color-accent); border-radius: 6px; padding: 10px; margin-top: 8px; }}
+                    .lora-slider-row {{ display: flex; gap: 16px; align-items: end; }}
+                    .lora-main-container button, .lora-main-container .wgp-lora-button {{ padding: 4px 12px !important; font-size: 1em !important; min-width: fit-content !important; flex-grow: 0; background: var(--button-secondary-background-fill); color: var(--button-secondary-text-color); border: 1px solid var(--button-secondary-border-color); border-radius: 4px; cursor: pointer; }}
+                    .lora-main-container button:hover, .lora-main-container .wgp-lora-button:hover {{ background: var(--button-secondary-background-fill-hover); border-color: var(--button-secondary-border-color-hover); }}
+                    .lora-section-header h3 {{ border-bottom: 1px solid var(--border-color-primary); padding-bottom: 4px; margin-top: 16px; margin-bottom: 8px; }}
+                    #{container_id} > .lora-section-header:first-child h3 {{
+                        margin-top: 0;
+                    }}
+                    .lora-main-container > h3:first-child {{ margin-top: 0; }}
+                    .lora-slider-group {{ flex: 1; }}
+                    .lora-slider-group label {{ display: block; color: var(--body-text-color); font-size: 0.9em; margin-bottom: 4px; }}
+                    .lora-slider-group input[type=range] {{ width: 100%; }}
+                    .hidden {{ display: none !important; }}
+                </style>
+                """
+
+                main_js_script = f"""
+                () => {{
+                    const debounce = (func, delay) => {{
+                        let timeout;
+                        return (...args) => {{
+                            clearTimeout(timeout);
+                            timeout = setTimeout(() => func.apply(this, args), delay);
+                        }};
+                    }};
+
+                    const updatePythonTextbox = debounce(() => {{
+                        const container = document.getElementById('{container_id}');
+                        if (!container) return;
+
+                        const loras = Array.from(container.querySelectorAll('.lora-main-container'));
+                        const textboxStrings = [];
+
+                        for (const loraEl of loras) {{
+                            const splits = Array.from(loraEl.querySelectorAll('.lora-step-split-container'));
+                            const loraStepStrings = [];
+                            for (const splitEl of splits) {{
+                                const sliders = Array.from(splitEl.querySelectorAll('input[type=range]'));
+                                const phaseValues = sliders
+                                    .filter(s => !s.closest('.lora-slider-group').classList.contains('hidden'))
+                                    .map(s => {{
+                                        const val = parseFloat(s.value);
+                                        return val % 1 === 0 ? String(val) : val.toFixed(2).replace(/\\.?0+$/, '');
+                                    }});
+                                if (phaseValues.length > 0) {{
+                                    loraStepStrings.push(phaseValues.join(';'));
+                                }}
+                            }}
+                            if (loraStepStrings.length > 0) {{
+                               textboxStrings.push(loraStepStrings.join(','));
+                            }}
+                        }}
+
+                        const separatorIndex = parseInt(container.dataset.separatorIndex || '-1');
+                        let finalString = "";
+                        if (separatorIndex > 0 && separatorIndex <= textboxStrings.length) {{
+                            const part1 = textboxStrings.slice(0, separatorIndex).join(' ');
+                            const part2 = textboxStrings.slice(separatorIndex).join(' ');
+                            finalString = part1 + '|' + part2;
+                        }} else {{
+                            finalString = textboxStrings.join(' ');
+                        }}
+                        
+                        const hiddenInput = document.querySelector('#{hidden_input_id} textarea');
+                        const updateButton = document.getElementById('{update_btn_id}');
+                        if (hiddenInput && updateButton) {{
+                            hiddenInput.value = finalString;
+                            hiddenInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            updateButton.click();
+                        }}
+                    }}, 200);
+
+                    function createSlider(phase, value, isVisible) {{
+                        const container = document.createElement('div');
+                        container.className = 'lora-slider-group';
+                        if (!isVisible) container.classList.add('hidden');
+                        container.innerHTML = `<label>Phase ${{phase}}</label><input type="range" min="0" max="1" step="0.05" value="${{value}}">`;
+                        container.querySelector('input[type="range"]').addEventListener('input', updatePythonTextbox);
+                        return container;
+                    }}
+
+                    function createStepSplit(loraIndex, splitIndex, values, guidancePhases, stepText) {{
+                        const splitContainer = document.createElement('div');
+                        splitContainer.className = 'lora-step-split-container';
+                        const sliderRow = document.createElement('div');
+                        sliderRow.className = 'lora-slider-row';
+                        const title = document.createElement('div');
+                        title.className = 'lora-split-title';
+                        title.innerHTML = `<strong>${{stepText}}</strong>`;
+                        splitContainer.appendChild(title);
+                        for (let i = 0; i < 3; i++) {{
+                            const isVisible = (i + 1) <= guidancePhases;
+                            const sliderValue = values[i] !== undefined ? values[i] : 1.0;
+                            sliderRow.appendChild(createSlider(i + 1, sliderValue, isVisible));
+                        }}
+                        splitContainer.appendChild(sliderRow);
+                        return splitContainer;
+                    }}
+
+                    function updateRejoinVisibility(loraContainer) {{
+                        const splits = loraContainer.querySelectorAll('.lora-step-split-container');
+                        const rejoinBtn = loraContainer.querySelector('.rejoin-btn');
+                        if (rejoinBtn) {{ rejoinBtn.style.display = splits.length > 1 ? 'inline-block' : 'none'; }}
+                    }}
+
+                    function handleSplit(e) {{
+                        const loraIndex = parseInt(e.target.dataset.loraIndex);
+                        const loraContainer = document.getElementById(`lora-container-{tab_id}-${{loraIndex}}`);
+                        const newSplit = createStepSplit(loraIndex, -1, [1.0, 1.0, 1.0], window.wgp_guidance_phases_{tab_id}, "");
+                        loraContainer.appendChild(newSplit);
+                        recalculateStepRanges(loraContainer);
+                        updateRejoinVisibility(loraContainer);
+                        updatePythonTextbox();
+                    }}
+
+                    function handleRejoin(e) {{
+                        const loraIndex = parseInt(e.target.dataset.loraIndex);
+                        const loraContainer = document.getElementById(`lora-container-{tab_id}-${{loraIndex}}`);
+                        const splits = loraContainer.querySelectorAll('.lora-step-split-container');
+                        if (splits.length > 1) {{
+                            splits[splits.length - 1].remove();
+                            recalculateStepRanges(loraContainer);
+                            updateRejoinVisibility(loraContainer);
+                            updatePythonTextbox();
+                        }}
+                    }}
+
+                    function recalculateStepRanges(loraContainer) {{
+                        const totalSteps = window.wgp_total_steps_{tab_id} || 1;
+                        const splits = loraContainer.querySelectorAll('.lora-step-split-container');
+                        const numSplits = splits.length;
+                        if (numSplits === 0) return;
+                        const stepsPerSplit = Math.floor(totalSteps / numSplits);
+                        const remainder = totalSteps % numSplits;
+                        let startStep = 0;
+                        splits.forEach((split, i) => {{
+                            const stepsInThisSplit = stepsPerSplit + (i < remainder ? 1 : 0);
+                            const endStep = startStep + stepsInThisSplit;
+                            const titleStrong = split.querySelector('.lora-split-title strong');
+                            if(titleStrong) {{
+                                const displayEnd = Math.max(startStep + 1, endStep);
+                                titleStrong.textContent = `Steps ${{startStep + 1}} to ${{displayEnd}}`;
+                            }}
+                            startStep = endStep;
+                        }});
+                    }}
+
+                    window.{js_renderer_func} = (jsonData) => {{
+                        let data;
+                        try {{ data = JSON.parse(jsonData); }} catch (e) {{ return; }}
+                        if (!data) return;
+                        const container = document.getElementById('{container_id}');
+                        if (!container) return;
+                        
+                        container.innerHTML = '';
+                        window.wgp_guidance_phases_{tab_id} = data.guidance_phases;
+                        window.wgp_total_steps_{tab_id} = data.total_steps;
+                        container.dataset.separatorIndex = data.separator_index;
+
+                        const createHeader = (text) => {{
+                            const headerDiv = document.createElement('div');
+                            headerDiv.className = 'lora-section-header';
+                            headerDiv.innerHTML = `<h3>${{text}}</h3>`;
+                            return headerDiv;
+                        }};
+
+                        if(data.separator_index > 0 && data.loras.length > 0) {{
+                            container.appendChild(createHeader('Accelerator LoRAs'));
+                        }}
+
+                        data.loras.forEach((lora, i) => {{
+                            if ((data.separator_index === -1 && i === 0) || data.separator_index === i) {{
+                               container.appendChild(createHeader('User LoRAs'));
+                            }}
+                            const loraContainer = document.createElement('div');
+                            loraContainer.className = 'lora-main-container';
+                            loraContainer.id = `lora-container-{tab_id}-${{i}}`;
+                            loraContainer.innerHTML = `<div class="gr-row"><h3>${{lora.name}}</h3><div style="display:flex; gap: 8px;"><button class="wgp-lora-button split-btn" data-lora-index="${{i}}" type="button">Split Steps</button><button class="wgp-lora-button rejoin-btn" data-lora-index="${{i}}" type="button" style="display:none;">Rejoin Step</button></div></div>`;
+                            lora.splits.forEach((split) => {{
+                                loraContainer.appendChild(createStepSplit(i, -1, split.values, data.guidance_phases, ""));
+                            }});
+                            container.appendChild(loraContainer);
+                            recalculateStepRanges(loraContainer);
+                            updateRejoinVisibility(loraContainer);
+                            loraContainer.querySelector('.split-btn').addEventListener('click', handleSplit);
+                            loraContainer.querySelector('.rejoin-btn').addEventListener('click', handleRejoin);
+                        }});
+                    }};
+                }}
+                """
+
+                def update_ui_data_from_python(selected_lora_names, multipliers_str, guidance_phases_val, total_steps):
+                    try:
+                        lora_names = selected_lora_names if selected_lora_names else []
+                        num_selected_loras = len(lora_names)
+
+                        all_stale_multipliers = [s for s in (multipliers_str or "").replace('|', ' ').split(' ') if s]
+                        num_stale_multipliers = len(all_stale_multipliers)
+                        
+                        is_desynced = num_selected_loras != num_stale_multipliers
+                        
+                        original_accelerator_count = 0
+                        if multipliers_str and '|' in multipliers_str:
+                            parts = multipliers_str.split('|')
+                            original_accelerator_count = len([s for s in parts[0].split(' ') if s])
+
+                        lora_names_for_ui = lora_names
+                        
+                        if is_desynced:
+                            multipliers_per_lora_str = ["1.0"] * num_selected_loras
+                            
+                            previous_state = self.previous_loras_state.get(tab_id, {'accelerators': []})
+                            old_accelerators = set(previous_state.get('accelerators', []))
+                            
+                            remaining_accelerators = [lora for lora in lora_names if lora in old_accelerators]
+                            user_loras = [lora for lora in lora_names if lora not in old_accelerators]
+                            
+                            lora_names_for_ui = remaining_accelerators + user_loras
+                            new_separator_index = len(remaining_accelerators)
+
+                            if new_separator_index == 0 or new_separator_index > len(lora_names_for_ui):
+                                new_separator_index = -1
+                        else:
+                            multipliers_per_lora_str = all_stale_multipliers
+                            new_separator_index = original_accelerator_count if original_accelerator_count > 0 else -1
+                            lora_names_for_ui = lora_names
+
+                        current_accelerators = lora_names_for_ui[:new_separator_index if new_separator_index != -1 else 0]
+                        self.previous_loras_state[tab_id] = {
+                            'loras': lora_names_for_ui,
+                            'accelerators': current_accelerators
+                        }
+
+                        loras_data = []
+                        for i, lora_name in enumerate(lora_names_for_ui):
+                            lora_obj = {"name": lora_name, "splits": []}
+                            steps_and_phases_str = multipliers_per_lora_str[i]
+                            
+                            for step_str in steps_and_phases_str.split(','):
+                                phase_values = []
+                                phase_strs = step_str.split(';')
+                                for k in range(3):
+                                    try:
+                                        phase_values.append(float(phase_strs[k]))
+                                    except (ValueError, IndexError):
+                                        phase_values.append(1.0)
+                                lora_obj["splits"].append({"values": phase_values})
+                            loras_data.append(lora_obj)
+
+                        payload = {
+                            "loras": loras_data,
+                            "guidance_phases": guidance_phases_val,
+                            "total_steps": total_steps or 1,
+                            "separator_index": new_separator_index,
+                        }
+                        
+                        return json.dumps(payload)
+                    except Exception:
+                        traceback.print_exc()
+                        return "{}"
+
+                def update_textbox_from_js(new_value):
+                    return gr.update(value=new_value)
+
+                with gr.Accordion("Dynamic Lora Multipliers", open=True) as main_accordion:
+                    gr.HTML(value=css)
+                    gr.HTML(f"<div id='{container_id}'></div>")
+                    
+                    with gr.Row(visible=False):
+                        hidden_input = gr.Text(elem_id=hidden_input_id)
+                        update_button = gr.Button(elem_id=update_btn_id)
+                    
+                    ui_data_json = gr.Text(elem_id=f"ui_data_json_{tab_id}", visible=False)
+
+                main_ui_block.load(fn=None, js=main_js_script)
+
+                ui_data_json.change(
+                    fn=None,
+                    inputs=[ui_data_json],
+                    js=f"(jsonData) => {{ if(window.{js_renderer_func}) window.{js_renderer_func}(jsonData); }}",
+                    show_progress="hidden"
+                )
+
+                input_components = [loras_choices, loras_multipliers, guidance_phases, num_inference_steps]
+
+                main_ui_block.load(
+                    fn=update_ui_data_from_python,
+                    inputs=input_components,
+                    outputs=[ui_data_json],
+                    show_progress="hidden"
+                )
+
+                events_to_trigger = [loras_choices.change, guidance_phases.change, num_inference_steps.change, loras_multipliers.blur]
+                for event_fn in events_to_trigger:
+                    event_fn(
+                        fn=update_ui_data_from_python,
+                        inputs=input_components,
+                        outputs=[ui_data_json],
+                        show_progress="hidden"
+                    )
+
+                update_button.click(
+                    fn=update_textbox_from_js,
+                    inputs=[hidden_input],
+                    outputs=[loras_multipliers],
+                    show_progress="hidden"
+                )
+
+                return main_accordion
+
+            self.insert_after(
+                target_component_id="loras_multipliers",
+                new_component_constructor=create_and_wire_ui
+            )
+        
+        except Exception:
+            traceback.print_exc()
+        
+        return {}
