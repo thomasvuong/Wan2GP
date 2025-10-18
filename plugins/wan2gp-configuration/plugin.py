@@ -63,7 +63,6 @@ class ConfigTabPlugin(WAN2GPPlugin):
                         ],
                         value=self.server_config.get("model_hierarchy_type", 1),
                         label="Models Hierarchy In User Interface",
-                        visible=self.args.betatest if hasattr(self.args, 'betatest') else False,
                         interactive=not self.args.lock_config
                     )
                     self.fit_canvas_choice = gr.Dropdown(

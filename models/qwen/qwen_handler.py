@@ -143,7 +143,7 @@ class family_handler():
             if denoising_strength < 1 and model_mode == 1:
                 gr.Info("Denoising Strength will be ignored while using Lora Inpainting")
             if outpainting_dims is not None and model_mode == 0 :
-                return "Outpainting is not supported with Masked Denoising  "
+                return "Outpainting is not supported with Masked Denoising"
             
     @staticmethod
     def get_rgb_factors(base_model_type ):

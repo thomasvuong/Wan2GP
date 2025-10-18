@@ -1,5 +1,5 @@
 from shared.utils import files_locator as fl
-
+import gradio as gr
 try:
     from .mtl_tts import SUPPORTED_LANGUAGES as _SUPPORTED_LANGUAGES
 except ImportError:  # pragma: no cover - fallback when package missing during startup
@@ -137,14 +137,8 @@ class family_handler:
             }
         )
 
+
     @staticmethod
-    def validate_generative_settings(base_model_type, model_def, inputs):
-        language_code = inputs.get("model_mode") or "en"
-        if language_code not in _SUPPORTED_LANGUAGES:
-            return f"Unsupported language '{language_code}'."
-        prompt = inputs.get("prompt", "")
-        if not prompt.strip():
-            return "Prompt text cannot be empty for Chatterbox."
-        cfg_weight = inputs.get("chatterbox_cfg_weight", 0.5)
-        if not (0.0 <= cfg_weight <= 1.5):
-            return "Chatterbox CFG weight should be between 0.0 and 1.5."
+    def validate_generative_prompt(base_model_type, model_def, inputs, one_prompt):
+        if len(one_prompt) > 300:
+            gr.Info("It is recommended to use a prompt that has less than 300 characters, otherwise you may get unexpected results.")
