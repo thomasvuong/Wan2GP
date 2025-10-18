@@ -6525,7 +6525,7 @@ def switch_advanced(state, new_advanced, lset_name):
 def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None ):
     state = inputs.pop("state")
     loras = state["loras"]
-    _plugin_data = inputs.pop("plugin_data", {})
+    plugin_data = inputs.pop("plugin_data", {})
     if "loras_choices" in inputs:
         loras_choices = inputs.pop("loras_choices")
         inputs.pop("model_filename", None)
@@ -6666,7 +6666,7 @@ def prepare_inputs_dict(target, inputs, model_type = None, model_filename = None
             inputs = app.plugin_manager.run_data_hooks(
                 'before_metadata_save',
                 configs=inputs,
-                plugin_data=inputs.pop('plugin_data', {}),
+                plugin_data=plugin_data,
                 model_type=model_type
             )
 
@@ -10284,7 +10284,7 @@ def create_ui():
             gl['refresh_form_trigger'] = refresh_form_trigger
             gl['save_form_trigger'] = save_form_trigger
             gl['state'] = state
-            app.finalize_ui_setup(gl, generator_tab_components)
+            app.finalize_ui_setup(gl, [generator_tab_components, edit_tab_components])
         if stats_app is not None:
             stats_app.setup_events(main, state)
         return main
