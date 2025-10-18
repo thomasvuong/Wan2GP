@@ -294,7 +294,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                     }};
                 }}
                 """
-
+    
                 def update_ui_data_from_python(selected_lora_names, multipliers_str, guidance_phases_val, total_steps):
                     try:
                         lora_names = selected_lora_names if selected_lora_names else []
@@ -302,46 +302,46 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
 
                         all_stale_multipliers = [s for s in (multipliers_str or "").replace('|', ' ').split(' ') if s]
                         num_stale_multipliers = len(all_stale_multipliers)
-                        
-                        is_desynced = num_selected_loras != num_stale_multipliers
-                        
-                        original_accelerator_count = 0
-                        if multipliers_str and '|' in multipliers_str:
-                            parts = multipliers_str.split('|')
-                            original_accelerator_count = len([s for s in parts[0].split(' ') if s])
 
-                        lora_names_for_ui = lora_names
-                        
-                        if is_desynced:
-                            multipliers_per_lora_str = ["1.0"] * num_selected_loras
-                            
-                            previous_state = self.previous_loras_state.get(tab_id, {'accelerators': []})
-                            old_accelerators = set(previous_state.get('accelerators', []))
-                            
-                            remaining_accelerators = [lora for lora in lora_names if lora in old_accelerators]
-                            user_loras = [lora for lora in lora_names if lora not in old_accelerators]
-                            
-                            lora_names_for_ui = remaining_accelerators + user_loras
-                            new_separator_index = len(remaining_accelerators)
+                        previous_state = self.previous_loras_state.get(tab_id, {'loras': [], 'accelerators': [], 'multipliers': {}})
+                        old_mult_map = previous_state.get('multipliers', {})
 
-                            if new_separator_index == 0 or new_separator_index > len(lora_names_for_ui):
+                        previous_loras_set = set(previous_state.get('loras', []))
+                        current_loras_set = set(lora_names)
+                        lora_list_changed = previous_loras_set != current_loras_set
+                        is_desynced = (num_selected_loras != num_stale_multipliers) or lora_list_changed
+
+                        lora_names_for_ui = []
+                        multipliers_per_lora_str = []
+                        new_separator_index = -1
+
+                        if not is_desynced:
+                            lora_names_for_ui = lora_names
+                            multipliers_per_lora_str = all_stale_multipliers
+                            if multipliers_str and '|' in multipliers_str:
+                                parts = multipliers_str.split('|')
+                                new_separator_index = len([s for s in parts[0].split(' ') if s])
+                            else:
                                 new_separator_index = -1
                         else:
-                            multipliers_per_lora_str = all_stale_multipliers
-                            new_separator_index = original_accelerator_count if original_accelerator_count > 0 else -1
-                            lora_names_for_ui = lora_names
+                            old_accelerators = set(previous_state.get('accelerators', []))
 
-                        current_accelerators = lora_names_for_ui[:new_separator_index if new_separator_index != -1 else 0]
-                        self.previous_loras_state[tab_id] = {
-                            'loras': lora_names_for_ui,
-                            'accelerators': current_accelerators
-                        }
+                            current_accelerators = [lora for lora in lora_names if lora in old_accelerators]
+                            current_user_loras = [lora for lora in lora_names if lora not in old_accelerators]
+                            lora_names_for_ui = current_accelerators + current_user_loras
+
+                            new_separator_index = len(current_accelerators) if current_accelerators else -1
+
+                            for lora_name in lora_names_for_ui:
+                                multipliers_per_lora_str.append(old_mult_map.get(lora_name, "1.0"))
 
                         loras_data = []
+                        final_mult_map = {}
                         for i, lora_name in enumerate(lora_names_for_ui):
                             lora_obj = {"name": lora_name, "splits": []}
                             steps_and_phases_str = multipliers_per_lora_str[i]
-                            
+                            final_mult_map[lora_name] = steps_and_phases_str
+
                             for step_str in steps_and_phases_str.split(','):
                                 phase_values = []
                                 phase_strs = step_str.split(';')
@@ -359,7 +359,14 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                             "total_steps": total_steps or 1,
                             "separator_index": new_separator_index,
                         }
-                        
+
+                        final_accelerators = lora_names_for_ui[:new_separator_index if new_separator_index != -1 else 0]
+                        self.previous_loras_state[tab_id] = {
+                            'loras': lora_names_for_ui,
+                            'accelerators': final_accelerators,
+                            'multipliers': final_mult_map
+                        }
+
                         return json.dumps(payload)
                     except Exception:
                         traceback.print_exc()
