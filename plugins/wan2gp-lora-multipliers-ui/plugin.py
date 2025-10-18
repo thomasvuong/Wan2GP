@@ -50,10 +50,41 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         margin-top: 0;
                     }}
                     .lora-main-container > h3:first-child {{ margin-top: 0; }}
-                    .lora-slider-group {{ flex: 1; }}
+                    .lora-slider-group {{
+                        flex: 1;
+                        display: flex;
+                        flex-direction: column;
+                    }}
+                    .lora-slider-input-wrapper {{
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }}
                     .lora-slider-group label {{ display: block; color: var(--body-text-color); font-size: 0.9em; margin-bottom: 4px; }}
-                    .lora-slider-group input[type=range] {{ width: 100%; }}
+                    .lora-slider-group input[type=range] {{
+                        flex-grow: 1;
+                        width: auto;
+                    }}
+                    .lora-slider-group input[type=number] {{
+                        width: 60px;
+                        padding: 4px;
+                        border: 1px solid var(--border-color-primary);
+                        border-radius: 4px;
+                        background-color: var(--input-background-fill);
+                        color: var(--input-text-color);
+                        font-size: 0.9em;
+                        text-align: center;
+                    }}
+                    .lora-slider-group input[type=number]::-webkit-inner-spin-button, 
+                    .lora-slider-group input[type=number]::-webkit-outer-spin-button {{ 
+                      -webkit-appearance: none; 
+                      margin: 0; 
+                    }}
+                    .lora-slider-group input[type=number] {{
+                      -moz-appearance: textfield;
+                    }}
                     .hidden {{ display: none !important; }}
+                    .lora-split-title {{ margin-bottom: 8px; }}
                 </style>
                 """
 
@@ -117,8 +148,39 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         const container = document.createElement('div');
                         container.className = 'lora-slider-group';
                         if (!isVisible) container.classList.add('hidden');
-                        container.innerHTML = `<label>Phase ${{phase}}</label><input type="range" min="0" max="1" step="0.05" value="${{value}}">`;
-                        container.querySelector('input[type="range"]').addEventListener('input', updatePythonTextbox);
+
+                        const initialValue = parseFloat(value);
+
+                        container.innerHTML = `
+                            <label>Phase ${{phase}}</label>
+                            <div class="lora-slider-input-wrapper">
+                                <input type="range" min="0" max="1" step="0.05" value="${{initialValue}}">
+                                <input type="number" min="0" max="1" step="0.05" value="${{initialValue.toFixed(2)}}">
+                            </div>
+                        `;
+
+                        const rangeInput = container.querySelector('input[type="range"]');
+                        const numberInput = container.querySelector('input[type="number"]');
+
+                        const syncAndUpdate = (source) => {{
+                            let val = parseFloat(source.value);
+                            if (isNaN(val)) val = 0;
+                            val = Math.max(0, Math.min(1, val));
+
+                            if (source === rangeInput) {{
+                                numberInput.value = val.toFixed(2);
+                            }} else {{
+                                rangeInput.value = val;
+                                if (source.value !== val.toFixed(2)) {{
+                                    numberInput.value = val.toFixed(2);
+                                }}
+                            }}
+                            updatePythonTextbox();
+                        }};
+
+                        rangeInput.addEventListener('input', () => syncAndUpdate(rangeInput));
+                        numberInput.addEventListener('input', () => syncAndUpdate(numberInput));
+
                         return container;
                     }}
 
@@ -141,6 +203,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                     }}
 
                     function updateRejoinVisibility(loraContainer) {{
+                        if (!loraContainer) return;
                         const splits = loraContainer.querySelectorAll('.lora-step-split-container');
                         const rejoinBtn = loraContainer.querySelector('.rejoin-btn');
                         if (rejoinBtn) {{ rejoinBtn.style.display = splits.length > 1 ? 'inline-block' : 'none'; }}
