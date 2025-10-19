@@ -83,12 +83,12 @@ class ConfigTabPlugin(WAN2GPPlugin):
 
                     self.attention_choice = gr.Dropdown(
                         choices=[
-                            ("Auto: Best available (sage3 > sage2 > sage > sdpa)", "auto"),
+                            ("Auto: Best available (sage2 > sage > sdpa)", "auto"),
                             ("sdpa: Default, always available", "sdpa"),
                             (f'flash{check_attn("flash")}: High quality, requires manual install', "flash"),
                             (f'xformers{check_attn("xformers")}: Good quality, less VRAM, requires manual install', "xformers"),
                             (f'sage{check_attn("sage")}: ~30% faster, requires manual install', "sage"),
-                            (f'sage2{check_attn("sage2")}: ~40% faster, requires manual install', "sage2"),
+                            (f'sage2/sage2++{check_attn("sage2")}: ~40% faster, requires manual install', "sage2"),
                         ] + ([(f'radial{check_attn("radial")}: Experimental, may be faster, requires manual install', "radial")] if self.args.betatest else []) + [
                             (f'sage3{check_attn("sage3")}: >50% faster, may have quality trade-offs, requires manual install', "sage3"),
                         ],

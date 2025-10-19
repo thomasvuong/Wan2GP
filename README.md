@@ -21,7 +21,37 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 **Follow DeepBeepMeep on Twitter/X to get the Latest News**: https://x.com/deepbeepmeep
 
 ## 🔥 Latest Updates : 
-### October 6 2025: WanGP v8.994 - A few last things before the Big Unknown ...
+### October 19 2025: WanGP v9.0 - 0.001 Later
+
+What else do you need ?
+
+With WanGP v9 you will have enough features to go on a desert island with no internet connection and comes back with a full Hollywood movie.
+
+First herer are the new models supported:
+- **Wan 2.1 Alpha** : a very requested model that can generate videos with *semi transparent background* (as it is very lora picky it supports only the *Self Forcing / lightning* loras accelerators)
+- **Chatterbox Multilingual**: the first *Voice Generator* in WanGP. Let's say you have a flu and lost your voice (somehow I can't think of another usecase), the world will still be able to hear you as *Chatterbox* can generate up to 15s clips of your voice using a recorded voice sample. Chatterbox works with numerous languages out the box.
+
+Other Features:
+- A new **Audio Gallery** to store your Chatterbox generations and import your audio assets. *Metadata support* (stored gen settings) for *Wav files* generated with WanGP available from day one. 
+- **Matanyone** improvements: you can now use it during a video gen, it will *suspend gracefully the Gen in progress*. *Input Video / Images* can be resized for faster processing & lower VRAM. Image version can now generate *Green screens* (not used by WanGP but I did it because someone asked for it and I am nice) and *Alpha masks*.
+- **Images Stored in Metadata**: Video Gen *Settings Metadata* that are stored in the Generated Videos can now contain the Start Image, Image Refs used to generate the Video. Many thanks to **Gunther-Schulz** for this contribution
+- **Three Levels of Hierarchy** to browse the models / finetunes: you can collect as many finetunes as you want now and they will no longer encumber the UI.
+- Added **Loras Accelerators** for Wan 2.1 1.3B and the latest Wan 2.2 Lightning Loras Accelerators
+- Sometime Less is More: removed the palingenesis finetunes that were controversial
+
+Huge Kudos & Thanks to **Tophness** that has outdone himself with these Great Features:
+- **Multicolors Queue** items with **Drag & Drop** to reorder them
+- **Edit a Gen Request** that is already in the queue
+- Added **Plugin support** to WanGP : found that features are missing in WanGP, you can now add tabs at the top in WanGP. Each tab may contain a full embedded App that can share data with the Video Generator of WanGP. Please check the Plugin guide written by Tophness and don't hesitate to contact him or me on the Discord if you have a plugin you want to share. I have added a new Plugins channels to discuss idea of plugins and help each other developing plugins. *Idea for a PlugIn that may end up popular*: a screen where you view the hard drive space used per model and that will let you remove unused models weights
+- Two Plugins ready to use designed & developped by **Tophness**: an **Extended Gallery** and a **Lora multipliers Wizard**
+
+WanGP v9 is now targetting Pytorch 2.8, don't forget to upgrade by doing:
+```bash
+pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
+```
+
+## 🔥 Latest Updates : 
+### October 6 2025: WanGP v8.999 - A few last things before the Big Unknown ...
 
 This new version hasn't any new model...
 
@@ -46,6 +76,7 @@ Last but not least the Lora's documentation has been updated.
 *update 8.992*: optimized gen with Lora, should be 10% faster if many loras
 *update 8.993*: Support for *Scaled FP8* format and samples *Paligenesis* finetunes, merged Loras Accelerators and Non Accelerators
 *update 8.994*: Added custom checkpoints folders
+*update 8.999*: fixed a lora + fp8 bug and version sync for the jump to the unknown 
 
 ### September 30 2025: WanGP v8.9 - Combinatorics
 
@@ -172,7 +203,7 @@ git clone https://github.com/deepbeepmeep/Wan2GP.git
 cd Wan2GP
 conda create -n wan2gp python=3.10.9
 conda activate wan2gp
-pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
+pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
 pip install -r requirements.txt
 ```
 
@@ -238,7 +269,6 @@ For detailed installation instructions for different GPU generations:
 - **[Finetunes](docs/FINETUNES.md)** - Add manually new models to WanGP
 - **[VACE ControlNet](docs/VACE.md)** - Advanced video control and manipulation
 - **[Command Line Reference](docs/CLI.md)** - All available command line options
-- **[Plugins API](docs/CLI.md)** - Develop your own WAN2GP extensions
 
 ## 📚 Documentation
 

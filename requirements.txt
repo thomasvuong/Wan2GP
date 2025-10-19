@@ -9,6 +9,7 @@ imageio-ffmpeg
 einops
 sentencepiece
 open_clip_torch>=2.29.0
+numpy==2.1.2
 
 # Video & media
 moviepy==1.0.3

@@ -8507,7 +8507,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                             audio_guidance_scale = gr.Slider(1.0, 20.0, value=ui_defaults.get("audio_guidance_scale", 4), step=0.5, label="Audio Guidance", visible= any_audio_guidance )
                             embedded_guidance_scale = gr.Slider(1.0, 20.0, value=ui_defaults.get("embedded_guidance", 6.0), step=0.5, label="Embedded Guidance Scale", visible=any_embedded_guidance )
 
-                        with gr.Row() as temperature_row:
+                        with gr.Row(visible=audio_only) as temperature_row:
                             temperature = gr.Slider( 0.1, 1.5, value=ui_defaults.get("temperature", 0.8), step=0.01, label="Temperature")
 
                         sample_solver_choices = model_def.get("sample_solvers", None)
