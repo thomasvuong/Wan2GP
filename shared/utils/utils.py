@@ -82,7 +82,7 @@ def get_file_creation_date(file_path):
     return datetime.fromtimestamp(stat.st_birthtime if hasattr(stat, 'st_birthtime') else stat.st_mtime)
 
 def sanitize_file_name(file_name, rep =""):
-    return file_name.replace("/",rep).replace("\\",rep).replace(":",rep).replace("|",rep).replace("?",rep).replace("<",rep).replace(">",rep).replace("\"",rep).replace("\n",rep).replace("\r",rep) 
+    return file_name.replace("/",rep).replace("\\",rep).replace("*",rep).replace(":",rep).replace("|",rep).replace("?",rep).replace("<",rep).replace(">",rep).replace("\"",rep).replace("\n",rep).replace("\r",rep) 
 
 def truncate_for_filesystem(s, max_bytes=None):
     if max_bytes is None:
