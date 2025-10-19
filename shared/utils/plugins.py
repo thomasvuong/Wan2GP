@@ -329,7 +329,7 @@ class PluginManager:
         for plugin_id, plugin in self.plugins.items():
             try:
                 for comp_id in plugin.component_requests:
-                    if comp_id in all_components:
+                    if comp_id in all_components and (not hasattr(plugin, comp_id) or getattr(plugin, comp_id) is None):
                         setattr(plugin, comp_id, all_components[comp_id])
 
                 requested_components = {
