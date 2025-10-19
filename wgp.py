@@ -242,14 +242,22 @@ def clean_image_list(gradio_list):
     gradio_list = [ convert_image( Image.open(img) if isinstance(img, str) else img  ) for img in gradio_list  ]        
     return gradio_list
 
-    
+
 def silent_cancel_edit(state):
-    state["editing_task_index"] = None
+    gen = get_gen_info(state)
+    state["editing_task_id"] = None
+    if gen.get("queue_paused_for_edit"):
+        gen["queue_paused_for_edit"] = False
     return gr.Tabs(selected="video_gen"), None, gr.update(visible=False)
 
 def cancel_edit(state):
-    state["editing_task_index"] = None
-    gr.Info("Edit cancelled.")
+    gen = get_gen_info(state)
+    state["editing_task_id"] = None
+    if gen.get("queue_paused_for_edit"):
+        gen["queue_paused_for_edit"] = False
+        gr.Info("Edit cancelled. Resuming queue processing.")
+    else:
+        gr.Info("Edit cancelled.")
     return gr.Tabs(selected="video_gen"), gr.update(visible=False)
 
 def edit_task_in_queue(
@@ -350,16 +358,21 @@ def edit_task_in_queue(
 
     gen = get_gen_info(state)
     queue = gen.get("queue", [])
-    editing_task_index = state.get("editing_task_index", None)
+    editing_task_id = state.get("editing_task_id", None)
 
-    if editing_task_index is None:
+    if editing_task_id is None:
         gr.Warning("No task selected for editing.")
         return None, gr.Tabs(selected="video_gen"), gr.update(visible=False)
 
-    task_to_edit_index = editing_task_index + 1
-    if task_to_edit_index >= len(queue):
-        gr.Warning("Task index out of bounds. Cannot edit.")
-        return update_queue_data(queue), gr.Tabs(selected="video_gen")
+    task_to_edit_index = -1
+    with lock:
+        task_to_edit_index = next((i for i, task in enumerate(queue) if task['id'] == editing_task_id), -1)
+
+    if task_to_edit_index == -1:
+        gr.Warning("Task not found in queue. It might have been processed or deleted.")
+        state["editing_task_id"] = None
+        gen["queue_paused_for_edit"] = False
+        return None, gr.Tabs(selected="video_gen"), gr.update(visible=False)
 
     task_to_edit = queue[task_to_edit_index]
     original_params = task_to_edit['params'].copy()
@@ -393,9 +406,14 @@ def edit_task_in_queue(
     update_task_thumbnails(task_to_edit, original_params)
     
     gr.Info(f"Task ID {task_to_edit['id']} has been updated successfully.")
-    edited_index = state["editing_task_index"]
-    state["editing_task_index"] = None
-    return edited_index, gr.Tabs(selected="video_gen"), gr.update(visible=False)
+
+    edited_index = state["editing_task_id"]
+    state["editing_task_id"] = None
+    if gen.get("queue_paused_for_edit"):
+        gr.Info("Resuming queue processing.")
+        gen["queue_paused_for_edit"] = False
+
+    return task_to_edit_index -1, gr.Tabs(selected="video_gen"), gr.update(visible=False)
 
 def process_prompt_and_add_tasks(state, current_gallery_tab, model_choice):
     def ret():
@@ -988,18 +1006,18 @@ def move_task(queue, old_index_str, new_index_str):
 
     return update_queue_data(queue)
 
-def remove_task(queue, selected_indices):
-    if not selected_indices or len(selected_indices) == 0:
+def remove_task(queue, task_id_to_remove):
+    if not task_id_to_remove:
         return update_queue_data(queue)
-    idx = selected_indices[0]
-    if isinstance(idx, list):
-        idx = idx[0]
-    idx = int(idx) + 1
+
     with lock:
-        if idx < len(queue):
-            if idx == 0:
+        idx_to_del = next((i for i, task in enumerate(queue) if task['id'] == task_id_to_remove), -1)
+        
+        if idx_to_del != -1:
+            if idx_to_del == 0:
                 wan_model._interrupt = True
-            del queue[idx]
+            del queue[idx_to_del]
+            
     return update_queue_data(queue)
 
 def update_global_queue_ref(queue):
@@ -1596,6 +1614,7 @@ def generate_queue_html(queue):
             continue
         
         row_index = i - 1
+        task_id = item['id']
         truncated_prompt = (item['prompt'][:97] + '...') if len(item['prompt']) > 100 else item['prompt']
         full_prompt = item['prompt'].replace('"', '&quot;')
         prompt_cell = f'<div class="prompt-cell" title="{full_prompt}">{truncated_prompt}</div>'
@@ -1619,12 +1638,12 @@ def generate_queue_html(queue):
         if end_img_uri:
             end_img_md = f'<div class="hover-image" onclick="showImageModal(\'end_{row_index}\')"><img src="{end_img_uri}" alt="{end_img_labels[0]}" /></div>'
 
-        edit_btn = f"""<button onclick="updateAndTrigger('edit_{row_index}')" class="action-button" title="Edit"><svg viewBox="0 0 64 64">
+        edit_btn = f"""<button onclick="updateAndTrigger('edit_{task_id}')" class="action-button" title="Edit"><svg viewBox="0 0 64 64">
 <path d="M0 0 C1.11826172 0.00322266 2.23652344 0.00644531 3.38867188 0.00976562 C4.55591797 0.01814453 5.72316406 0.02652344 6.92578125 0.03515625 C8.10462891 0.03966797 9.28347656 0.04417969 10.49804688 0.04882812 C13.41150914 0.06062352 16.32486988 0.07708355 19.23828125 0.09765625 C19.89828125 1.41765625 20.55828125 2.73765625 21.23828125 4.09765625 C20.57828125 5.08765625 19.91828125 6.07765625 19.23828125 7.09765625 C16.71630859 7.43823242 16.71630859 7.43823242 13.57421875 7.390625 C12.56407715 7.38313232 11.55393555 7.37563965 10.51318359 7.36791992 C9.22621582 7.34060791 7.93924805 7.3132959 6.61328125 7.28515625 C2.52953125 7.22328125 -1.55421875 7.16140625 -5.76171875 7.09765625 C-5.76171875 20.62765625 -5.76171875 34.15765625 -5.76171875 48.09765625 C7.76828125 48.09765625 21.29828125 48.09765625 35.23828125 48.09765625 C35.11973183 40.33403423 35.11973183 40.33403423 34.96801758 32.57104492 C34.9605249 31.60400635 34.95303223 30.63696777 34.9453125 29.640625 C34.92960205 28.6508667 34.9138916 27.6611084 34.89770508 26.64135742 C35.28781002 23.72773495 35.95836413 22.87267823 38.23828125 21.09765625 C39.55828125 21.75765625 40.87828125 22.41765625 42.23828125 23.09765625 C42.35462058 27.32659093 42.42558077 31.55511299 42.48828125 35.78515625 C42.53855469 37.58243164 42.53855469 37.58243164 42.58984375 39.41601562 C42.60273437 40.57294922 42.615625 41.72988281 42.62890625 42.921875 C42.64985352 43.98494873 42.67080078 45.04802246 42.69238281 46.14331055 C42.08668997 50.08389607 41.33970543 51.54877801 38.23828125 54.09765625 C34.80064189 54.82978838 31.42929782 54.77430179 27.92578125 54.7265625 C26.41697388 54.73018044 26.41697388 54.73018044 24.87768555 54.73387146 C22.75272679 54.73289272 20.62774263 54.71949279 18.50292969 54.69458008 C15.2497702 54.66027739 11.99932742 54.67391872 8.74609375 54.69335938 C6.68097802 54.68646084 4.6158693 54.67678839 2.55078125 54.6640625 C1.57778076 54.66902237 0.60478027 54.67398224 -0.39770508 54.67909241 C-4.22696801 54.61228762 -6.97272175 54.52167304 -10.37524414 52.69311523 C-12.57503646 48.57513809 -12.31211348 44.60130827 -12.2578125 40.00390625 C-12.25926773 39.02023071 -12.26072296 38.03655518 -12.26222229 37.02307129 C-12.26056374 34.94520096 -12.24900737 32.8673183 -12.22827148 30.78955078 C-12.19932355 27.60916966 -12.20766242 24.43045611 -12.22070312 21.25 C-12.21446541 19.23046065 -12.20607421 17.21092656 -12.1953125 15.19140625 C-12.19824814 14.24027954 -12.20118378 13.28915283 -12.20420837 12.3092041 C-12.1915242 11.42148315 -12.17884003 10.53376221 -12.16577148 9.61914062 C-12.1603685 8.84066772 -12.15496552 8.06219482 -12.1493988 7.26013184 C-11.65561813 4.50582801 -10.66022148 3.13054266 -8.76171875 1.09765625 C-5.58384334 0.03836445 -3.33582932 -0.01693314 0 0 Z " fill="#5F7D8B" transform="translate(11.76171875,9.90234375)"/>
 <path d="M0 0 C3.18086518 1.50946511 5.29869906 3.07941825 7.75 5.625 C8.67039062 6.57246094 8.67039062 6.57246094 9.609375 7.5390625 C10.29773437 8.26222656 10.29773437 8.26222656 11 9 C8.59523682 14.54812095 4.06412729 18.38524881 -0.125 22.625 C-0.95515625 23.49640625 -1.7853125 24.3678125 -2.640625 25.265625 C-7.55981439 30.24649701 -10.9212929 33.32655006 -18 34 C-19.67421842 33.70694442 -21.34358949 33.38104214 -23 33 C-22.73322255 23.701482 -19.99207397 18.8860205 -13.359375 12.48046875 C-12.36512148 11.56972466 -11.37032304 10.65957512 -10.375 9.75 C-9.37010113 8.79537851 -8.3674748 7.83835883 -7.3671875 6.87890625 C-4.93268233 4.56144459 -2.47807311 2.27066292 0 0 Z " fill="#42A5F5" transform="translate(45,8)"/>
 <path d="M0 0 C1.9375 1 1.9375 1 3 3 C3.73574144 8.06844106 3.73574144 8.06844106 3 11 C1.18277145 13.20174358 -0.58687091 14.39124727 -3 16 C-6.3 12.7 -9.6 9.4 -13 6 C-8.2454497 0.05681213 -7.32417654 -0.5139773 0 0 Z " fill="#42A5F5" transform="translate(61,0)"/>
 </svg></button>"""
-        remove_btn = f"""<button onclick="updateAndTrigger('remove_{row_index}')" class="action-button" title="Remove"><svg viewBox="0 0 64 64">
+        remove_btn = f"""<button onclick="updateAndTrigger('remove_{task_id}')" class="action-button" title="Remove"><svg viewBox="0 0 64 64">
 <path d="M0 0 C0.91974609 -0.01224609 1.83949219 -0.02449219 2.78710938 -0.03710938 C3.67076172 -0.03904297 4.55441406 -0.04097656 5.46484375 -0.04296875 C6.27429443 -0.04707764 7.08374512 -0.05118652 7.91772461 -0.05541992 C10.0625 0.1875 10.0625 0.1875 13.0625 2.1875 C13.75 4.8125 13.75 4.8125 14.0625 7.1875 C15.42375 7.06375 15.42375 7.06375 16.8125 6.9375 C20.0625 7.1875 20.0625 7.1875 22.5 8.875 C24.0625 11.1875 24.0625 11.1875 23.9375 13.5625 C23.0625 16.1875 23.0625 16.1875 22.04296875 18.640625 C20.67104278 23.60360819 20.63408506 28.43456418 20.5 33.5625 C20.38290046 37.43924233 20.24089926 41.31308782 20.0625 45.1875 C20.02600342 46.35974121 20.02600342 46.35974121 19.98876953 47.55566406 C19.75385703 51.06553322 19.41343427 52.82998048 16.91577148 55.37451172 C13.52950324 57.5261698 11.60953176 57.70262762 7.625 57.71875 C5.78808594 57.72648437 5.78808594 57.72648437 3.9140625 57.734375 C2.64304687 57.71890625 1.37203125 57.7034375 0.0625 57.6875 C-1.84402344 57.71070312 -1.84402344 57.71070312 -3.7890625 57.734375 C-5.01367188 57.72921875 -6.23828125 57.7240625 -7.5 57.71875 C-8.61503906 57.71423828 -9.73007812 57.70972656 -10.87890625 57.70507812 C-14.62316268 57.07147151 -16.29526355 55.87931783 -18.9375 53.1875 C-19.5718301 50.34090421 -19.84799189 48.06242942 -19.9375 45.1875 C-19.97858887 44.29514648 -20.01967773 43.40279297 -20.06201172 42.48339844 C-20.22958856 38.48982026 -20.35059881 34.49569673 -20.45507812 30.5 C-20.63368241 25.36428436 -20.93861234 20.9970841 -22.9375 16.1875 C-23.8125 13.5625 -23.8125 13.5625 -23.9375 11.1875 C-22.375 8.875 -22.375 8.875 -19.9375 7.1875 C-16.6875 6.9375 -16.6875 6.9375 -13.9375 7.1875 C-13.64875 6.218125 -13.36 5.24875 -13.0625 4.25 C-10.91276671 -1.60205174 -5.44118975 0.00379706 0 0 Z M-9.9375 4.1875 C-9.6075 5.5075 -9.2775 6.8275 -8.9375 8.1875 C-2.6675 8.1875 3.6025 8.1875 10.0625 8.1875 C10.0625 6.8675 10.0625 5.5475 10.0625 4.1875 C3.4625 4.1875 -3.1375 4.1875 -9.9375 4.1875 Z M-19.9375 16.1875 C-19.9375 16.5175 -19.9375 16.8475 -19.9375 17.1875 C-6.7375 17.1875 6.4625 17.1875 20.0625 17.1875 C20.0625 16.8575 20.0625 16.5275 20.0625 16.1875 C6.8625 16.1875 -6.3375 16.1875 -19.9375 16.1875 Z M-9.9375 29.1875 C-9.9375 34.7975 -9.9375 40.4075 -9.9375 46.1875 C-9.6075 46.1875 -9.2775 46.1875 -8.9375 46.1875 C-8.9375 40.5775 -8.9375 34.9675 -8.9375 29.1875 C-9.2675 29.1875 -9.5975 29.1875 -9.9375 29.1875 Z M9.0625 29.1875 C9.0625 34.7975 9.0625 40.4075 9.0625 46.1875 C9.3925 46.1875 9.7225 46.1875 10.0625 46.1875 C10.0625 40.5775 10.0625 34.9675 10.0625 29.1875 C9.7325 29.1875 9.4025 29.1875 9.0625 29.1875 Z " fill="#2A8BFF" transform="translate(31.9375,3.8125)"/>
 </svg>
 </button>"""
@@ -5926,9 +5945,29 @@ def process_tasks(state):
     yield time.time(), time.time() 
     prompt_no = 0
     while len(queue) > 0:
+        paused_for_edit = False
+        while gen.get("queue_paused_for_edit", False):
+            if not paused_for_edit:
+                gen["status"] = "Queue paused for editing..."
+                yield time.time(), time.time() 
+                paused_for_edit = True
+            time.sleep(0.5)
+        
+        if paused_for_edit:
+            gen["status"] = "Resuming queue processing..."
+            yield time.time(), time.time()
+
         prompt_no += 1
         gen["prompt_no"] = prompt_no
-        task = queue[0]
+
+        task = None
+        with lock:
+            if len(queue) > 0:
+                task = queue[0]
+
+        if task is None:
+            break
+
         task_id = task["id"] 
         params = task['params']
 
@@ -5961,7 +6000,6 @@ def process_tasks(state):
             finally:
                 send_cmd("exit", None)
 
-
         async_run(generate_video_error_handler)
 
         while True:
@@ -5984,7 +6022,6 @@ def process_tasks(state):
                 yield time.time() , time.time() 
             elif cmd == "progress":
                 gen["progress_args"] = data
-                # progress(*data)
             elif cmd == "preview":
                 torch.cuda.current_stream().synchronize()
                 preview= None if data== None else generate_preview(params["model_type"], data) 
@@ -5998,23 +6035,20 @@ def process_tasks(state):
         if abort:
             gen["abort"] = False
             status = "Video Generation Aborted", "Video Generation Aborted"
-            # yield  gr.Text(), gr.Text()
             yield time.time() , time.time() 
             gen["status"] = status
 
-        queue[:] = [item for item in queue if item['id'] != task['id']]
+        with lock:
+            queue[:] = [item for item in queue if item['id'] != task_id]
         update_global_queue_ref(queue)
 
     gen["prompts_max"] = 0
     gen["prompt"] = ""
     end_time = time.time()
     if abort:
-        # status = f"Video generation was aborted. Total Generation Time: {end_time-start_time:.1f}s" 
         status = f"Video generation was aborted. Total Generation Time: {format_time(end_time-start_time)}" 
     else:
-        # status = f"Total Generation Time: {end_time-start_time:.1f}s" 
-        status = f"Total Generation Time: {format_time(end_time-start_time)}"         
-        # Play notification sound when video generation completed successfully
+        status = f"Total Generation Time: {format_time(end_time-start_time)}"
         try:
             if server_config.get("notification_sound_enabled", 1):
                 volume = server_config.get("notification_sound_volume", 50)
@@ -7302,20 +7336,27 @@ def handle_queue_action(state, action_string):
         action = parts[0]
         params = parts[1:]
     except (IndexError, ValueError):
-        return gr.HTML(), gr.Tabs(), gr.update()
+        return update_queue_data(queue), gr.Tabs(), gr.update()
 
     if action == "edit" or action == "silent_edit":
-        row_index = int(params[0])
-        state["editing_task_index"] = row_index
-        task_to_edit_index = row_index + 1
+        task_id = int(params[0])
         
-        if task_to_edit_index < len(queue):
-            task_data = queue[task_to_edit_index]
+        with lock:
+            task_index = next((i for i, task in enumerate(queue) if task['id'] == task_id), -1)
+        
+        if task_index != -1:
+            state["editing_task_id"] = task_id
+            task_data = queue[task_index]
+
+            if task_index == 1:
+                gen["queue_paused_for_edit"] = True
+                gr.Info("Queue processing will pause after the current generation, as you are editing the next item to generate.")
+
             if action == "edit":
-                gr.Info(f"Loading task '{task_data['prompt'][:50]}...' for editing.")
+                gr.Info(f"Loading task ID {task_id} ('{task_data['prompt'][:50]}...') for editing.")
             return update_queue_data(queue), gr.Tabs(selected="edit"), gr.update(visible=True)
         else:
-            gr.Warning("Task index out of bounds.")
+            gr.Warning("Task ID not found. It may have already been processed.")
             return update_queue_data(queue), gr.Tabs(), gr.update()
             
     elif action == "move" and len(params) == 3 and params[1] == "to":
@@ -7323,8 +7364,8 @@ def handle_queue_action(state, action_string):
         return move_task(queue, old_index_str, new_index_str), gr.Tabs(), gr.update()
         
     elif action == "remove":
-        row_index = int(params[0])
-        new_queue_data = remove_task(queue, [row_index])
+        task_id_to_remove = int(params[0])
+        new_queue_data = remove_task(queue, task_id_to_remove)
         gen["prompts_max"] = gen.get("prompts_max", 0) - 1
         update_status(state)
         return new_queue_data, gr.Tabs(), gr.update()
@@ -10231,34 +10272,35 @@ def create_ui():
                 edit_tab_inputs = [edit_tab_components[k] for k in inputs_names] + [edit_tab_components['state'], edit_tab_components['plugin_data']] + edit_tab_components['extra_inputs']
 
                 def fill_inputs_for_edit(state):
-                    editing_task_index = state.get("editing_task_index", None)
-                    default_return = [gr.update()] * (1 + len(edit_tab_inputs))
+                    editing_task_id = state.get("editing_task_id", None)
+                    all_outputs_count = 1 + len(edit_tab_inputs)
+                    default_return = [gr.update()] * all_outputs_count
 
-                    if editing_task_index is None: return default_return
+                    if editing_task_id is None:
+                        return default_return
 
                     gen = get_gen_info(state)
                     queue = gen.get("queue", [])
-                    task_to_edit_index = editing_task_index + 1
-                    if task_to_edit_index >= len(queue):
-                        gr.Warning("Task to edit not found in queue.")
-                        state["editing_task_index"] = None
+                    task = next((t for t in queue if t.get('id') == editing_task_id), None)
+
+                    if task is None:
+                        gr.Warning("Task to edit not found in queue. It might have been processed or deleted.")
+                        state["editing_task_id"] = None
                         return default_return
 
-                    task = queue[task_to_edit_index]
                     ui_defaults = task['params'].copy()
-                    
+
+                    media_keys_to_normalize = ['image_start', 'image_end', 'image_refs']
+                    for key in media_keys_to_normalize:
+                        if key in ui_defaults and ui_defaults[key] is not None:
+                            if not isinstance(ui_defaults[key], list):
+                                ui_defaults[key] = [ui_defaults[key]]
+
                     prompt_text = task.get('prompt', 'Unknown Prompt')[:80]
-                    edit_title_text = f"<div align='center'><h2>Editing '{prompt_text}...'</h2></div>"
+                    edit_title_text = f"<div align='center'><h2>Editing task ID {editing_task_id}: '{prompt_text}...'</h2></div>"
 
-                    media_keys = ['image_start', 'image_end', 'image_refs']
-                    for key in media_keys:
-                        if key in ui_defaults and ui_defaults[key] is not None and not isinstance(ui_defaults[key], list):
-                            ui_defaults[key] = [ui_defaults[key]]
-
-                    if ui_defaults.get('model_type') != state["model_type"]:
-                        gr.Warning(f"Editing a task for a different model ({ui_defaults.get('model_type')}). Some settings may not apply.")
-
-                    return [edit_title_text] + [ui_defaults.get(name, gr.update()) for name in inputs_names] + [gr.update(), gr.update()] + [gr.update()] * len(edit_tab_components['extra_inputs'])
+                    all_new_component_values = generate_video_tab(update_form=True, state_dict=state, ui_defaults=ui_defaults)
+                    return [edit_title_text] + all_new_component_values
 
                 edit_btn = edit_tab_components['edit_btn']
                 cancel_btn = edit_tab_components['cancel_btn']
