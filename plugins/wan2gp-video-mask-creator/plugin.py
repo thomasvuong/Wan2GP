@@ -1,5 +1,3 @@
-# plugins/wan2gp-video-mask-creator/plugin.py
-
 import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
 from preprocessing.matanyone import app as matanyone_app
@@ -34,11 +32,9 @@ class VideoMaskCreatorPlugin(WAN2GPPlugin):
         )
 
     def create_mask_creator_ui(self):
-        """Phase 1: Create UI components and store them."""
         self.mat_components = self.matanyone_app.create_ui_components()
 
     def post_ui_setup(self, components: dict):
-        """Phase 2: Bind all events after the entire UI is constructed."""
         self.matanyone_app.bind_events(
             self.mat_components,
             self.main_tabs,

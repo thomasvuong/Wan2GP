@@ -413,7 +413,7 @@ class WAN2GPApplication:
 
         for plugin_id, plugin in loaded_plugins.items():
             for tab_id, tab in plugin.tabs.items():
-                self.tab_to_plugin_map[f"plugin_{tab_id}"] = plugin
+                self.tab_to_plugin_map[tab.label] = plugin
                 tab_info = {
                     'id': tab_id,
                     'label': tab.label,
