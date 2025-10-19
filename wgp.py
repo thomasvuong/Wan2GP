@@ -3262,6 +3262,10 @@ else:
 
 gen_in_progress = False
 
+def is_generation_in_progress():
+    global gen_in_progress
+    return gen_in_progress
+
 def get_auto_attention():
     for attn in ["sage2","sage","sdpa"]:
         if attn in attention_modes_supported:

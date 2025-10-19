@@ -34,6 +34,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.request_global("get_sorted_dropdown")
         self.request_global("app")
         self.request_global("fl")
+        self.request_global("is_generation_in_progress")        
 
         self.request_component("state")
         self.request_component("resolution")
@@ -213,6 +214,9 @@ class ConfigTabPlugin(WAN2GPPlugin):
         return [self.release_RAM_btn]
 
     def _save_changes(self, state, *args):
+        if self.is_generation_in_progress():
+            return "<div style='color:red; text-align:center;'>Unable to change config when a generation is in progress.</div>"
+
         if self.args.lock_config:
             return "<div style='color:red; text-align:center;'>Configuration is locked by command-line arguments.</div>"
         
@@ -284,6 +288,9 @@ class ConfigTabPlugin(WAN2GPPlugin):
         return "<div style='color:green; text-align:center;'>Settings saved. Please restart the application for all changes to take effect.</div>"
 
     def _save_and_restart(self, *args):
-        self._save_changes(*args)
-        gr.Info("Settings saved. Restarting application...")
-        self.quit_application()
+        save_message = self._save_changes(*args)
+        if "Settings saved" in save_message:
+            gr.Info("Settings saved. Restarting application...")
+            self.quit_application()
+        else:
+            gr.Warning("Could not save settings. Restart aborted.")
