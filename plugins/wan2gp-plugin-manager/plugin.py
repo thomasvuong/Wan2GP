@@ -203,6 +203,38 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                 self.plugin_action_input = gr.Textbox(elem_id="plugin_action_input")
                 self.save_action_input = gr.Textbox(elem_id="save_action_input")
 
+        js=self._get_js_script_html()
+        self.main.load(
+            fn=self._refresh_ui,
+            inputs=[],
+            outputs=[self.plugins_html_display],
+            js=js
+        )
+        self.save_plugins_button.click(
+            fn=None, js="handleSave(false)"
+        )
+        self.save_and_restart_button.click(
+            fn=None, js="handleSave(true)"
+        )
+
+        self.save_action_input.change(
+            fn=self._handle_save_action,
+            inputs=[self.save_action_input],
+            outputs=[self.plugins_html_display]
+        )
+        
+        self.plugin_action_input.change(
+            fn=self._handle_plugin_action_from_json,
+            inputs=[self.plugin_action_input],
+            outputs=[self.plugins_html_display]
+        )
+
+        self.install_plugin_button.click(
+            fn=self._install_plugin_and_refresh,
+            inputs=[self.plugin_url_textbox],
+            outputs=[self.plugins_html_display, self.plugin_url_textbox]
+        )
+
         return plugin_blocks
 
     def _refresh_ui(self):
@@ -279,38 +311,3 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             gr.Warning(f"Could not perform plugin action: {e}")
             traceback.print_exc()
         return self._refresh_ui()
-
-    def post_ui_setup(self, components: dict):
-        js=self._get_js_script_html()
-        self.main.load(
-            fn=self._refresh_ui,
-            inputs=[],
-            outputs=[self.plugins_html_display],
-            js=js
-        )
-        self.save_plugins_button.click(
-            fn=None, js="handleSave(false)"
-        )
-        self.save_and_restart_button.click(
-            fn=None, js="handleSave(true)"
-        )
-
-        self.save_action_input.change(
-            fn=self._handle_save_action,
-            inputs=[self.save_action_input],
-            outputs=[self.plugins_html_display]
-        )
-        
-        self.plugin_action_input.change(
-            fn=self._handle_plugin_action_from_json,
-            inputs=[self.plugin_action_input],
-            outputs=[self.plugins_html_display]
-        )
-
-        self.install_plugin_button.click(
-            fn=self._install_plugin_and_refresh,
-            inputs=[self.plugin_url_textbox],
-            outputs=[self.plugins_html_display, self.plugin_url_textbox]
-        )
-        
-        return {}

@@ -12,7 +12,6 @@ class VideoMaskCreatorPlugin(WAN2GPPlugin):
         
         self.matanyone_app = matanyone_app
         self.vmc_event_handler = self.matanyone_app.get_vmc_event_handler()
-        self.mat_components = {} 
 
     def setup_ui(self):
         self.request_global("download_shared_done")
@@ -32,17 +31,14 @@ class VideoMaskCreatorPlugin(WAN2GPPlugin):
         )
 
     def create_mask_creator_ui(self):
-        self.mat_components = self.matanyone_app.create_ui_components()
-
-    def post_ui_setup(self, components: dict):
-        self.matanyone_app.bind_events(
-            self.mat_components,
-            self.main_tabs,
-            None, 
-            self.state,
-            self.refresh_form_trigger,
-            self.server_config,
-            self.get_current_model_settings
+        matanyone_tab_state = gr.State({ "tab_no": 0 })
+        self.matanyone_app.display(
+            tabs=self.main_tabs,
+            tab_state=matanyone_tab_state,
+            state=self.state,
+            refresh_form_trigger=self.refresh_form_trigger,
+            server_config=self.server_config,
+            get_current_model_settings_fn=self.get_current_model_settings
         )
 
     def on_tab_select(self, state: dict) -> None:

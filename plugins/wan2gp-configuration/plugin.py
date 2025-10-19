@@ -174,6 +174,42 @@ class ConfigTabPlugin(WAN2GPPlugin):
             with gr.Row():
                 self.apply_btn = gr.Button("Save Settings")
                 self.apply_and_restart_btn = gr.Button("Save and Restart", variant="primary")
+
+        inputs = [
+            self.state,
+            self.transformer_types_choices, self.model_hierarchy_type_choice, self.fit_canvas_choice,
+            self.attention_choice, self.preload_model_policy_choice, self.clear_file_list_choice,
+            self.display_stats_choice, self.max_frames_multiplier_choice, self.checkpoints_paths_choice,
+            self.UI_theme_choice, self.queue_color_scheme_choice,
+            self.quantization_choice, self.transformer_dtype_policy_choice, self.mixed_precision_choice,
+            self.text_encoder_quantization_choice, self.VAE_precision_choice, self.compile_choice,
+            self.depth_anything_v2_variant_choice, self.vae_config_choice, self.boost_choice,
+            self.profile_choice, self.preload_in_VRAM_choice,
+            self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice,
+            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice,
+            self.metadata_choice, self.embed_source_images_choice,
+            self.video_save_path_choice, self.image_save_path_choice,
+            self.notification_sound_enabled_choice, self.notification_sound_volume_choice,
+            self.resolution
+        ]
+
+        self.apply_btn.click(
+            fn=self._save_changes,
+            inputs=inputs,
+            outputs=[self.msg]
+        )
+        
+        self.apply_and_restart_btn.click(
+            fn=self._save_and_restart,
+            inputs=inputs,
+            outputs=None
+        )
+
+        def release_ram_and_notify():
+            self.release_model()
+            gr.Info("Models unloaded from RAM.")
+        
+        self.release_RAM_btn.click(fn=release_ram_and_notify)
         return [self.release_RAM_btn]
 
     def _save_changes(self, state, *args):
@@ -251,44 +287,3 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self._save_changes(*args)
         gr.Info("Settings saved. Restarting application...")
         self.quit_application()
-
-    def post_ui_setup(self, components: dict):
-        state = components['state']
-        resolution = components['resolution']
-
-        inputs = [
-            state,
-            self.transformer_types_choices, self.model_hierarchy_type_choice, self.fit_canvas_choice,
-            self.attention_choice, self.preload_model_policy_choice, self.clear_file_list_choice,
-            self.display_stats_choice, self.max_frames_multiplier_choice, self.checkpoints_paths_choice,
-            self.UI_theme_choice, self.queue_color_scheme_choice,
-            self.quantization_choice, self.transformer_dtype_policy_choice, self.mixed_precision_choice,
-            self.text_encoder_quantization_choice, self.VAE_precision_choice, self.compile_choice,
-            self.depth_anything_v2_variant_choice, self.vae_config_choice, self.boost_choice,
-            self.profile_choice, self.preload_in_VRAM_choice,
-            self.enhancer_enabled_choice, self.enhancer_mode_choice, self.mmaudio_enabled_choice,
-            self.video_output_codec_choice, self.image_output_codec_choice, self.audio_output_codec_choice,
-            self.metadata_choice, self.embed_source_images_choice,
-            self.video_save_path_choice, self.image_save_path_choice,
-            self.notification_sound_enabled_choice, self.notification_sound_volume_choice,
-            resolution
-        ]
-
-        self.apply_btn.click(
-            fn=self._save_changes,
-            inputs=inputs,
-            outputs=[self.msg]
-        )
-        
-        self.apply_and_restart_btn.click(
-            fn=self._save_and_restart,
-            inputs=inputs,
-            outputs=None
-        )
-
-        def release_ram_and_notify():
-            self.release_model()
-            gr.Info("Models unloaded from RAM.")
-        
-        self.release_RAM_btn.click(fn=release_ram_and_notify)
-        return {}
