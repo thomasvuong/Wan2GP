@@ -7926,7 +7926,7 @@ def download_lora(state, lora_url, progress=gr.Progress(track_tqdm=True),):
 def set_gallery_tab(state, evt:gr.SelectData):                
     return evt.index, "video" if evt.index == 0 else "audio"
 
-def generate_video_tab(update_form = False, state_dict = None, ui_defaults = None, model_family = None, model_base_type_choice = None, model_choice = None, header = None, main = None, main_tabs= None, tab_id='generate', edit_tab=None, default_state = None):
+def generate_video_tab(update_form = False, state_dict = None, ui_defaults = None, model_family = None, model_base_type_choice = None, model_choice = None, header = None, main = None, main_tabs= None, tab_id='generate', edit_tab=None, default_state=None):
     global inputs_names #, advanced
     plugin_data = gr.State({})
 
@@ -8860,7 +8860,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
         with gr.Column(visible=(tab_id == 'generate')):
             if not update_form:
-                state = default_state if default_state is not None else gr.State(state_dict)  
+                state = default_state if default_state is not None else gr.State(state_dict)
                 gen_status = gr.Text(interactive= False, label = "Status")
                 status_trigger = gr.Text(interactive= False, visible=False)
                 default_files = []
@@ -9391,7 +9391,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict, plugin_data] + extra_inputs
         return gen_inputs
     else:
-        if default_state is None and hasattr(app, 'plugin_manager'):
+        if hasattr(app, 'plugin_manager'):
             app.run_component_insertion(locals_dict)
         return locals_dict
 
@@ -10249,7 +10249,7 @@ def create_ui():
                     main_tabs=main_tabs,
                     tab_id='edit',
                     edit_tab=edit_tab,
-                    default_state = state,
+                    default_state=state
                 )
 
                 edit_tab_inputs = [edit_tab_components[k] for k in inputs_names] + [edit_tab_components['state'], edit_tab_components['plugin_data']] + edit_tab_components['extra_inputs']
