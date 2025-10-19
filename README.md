@@ -49,6 +49,7 @@ WanGP v9 is now targetting Pytorch 2.8, don't forget to upgrade by doing:
 ```bash
 pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
 ```
+You will need to upgrade Sage Attention or Flash (check the installation guide)
 
 ## 🔥 Latest Updates : 
 ### October 6 2025: WanGP v8.999 - A few last things before the Big Unknown ...

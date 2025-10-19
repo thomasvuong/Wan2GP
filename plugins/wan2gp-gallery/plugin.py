@@ -253,6 +253,66 @@ class GalleryPlugin(WAN2GPPlugin):
                                 self.cancel_join_btn = gr.Button("Cancel")
                 self.selected_files_for_backend = gr.Text(label="Selected Files", visible=False, elem_id="selected-files-backend")
                 self.path_for_settings_loader = gr.Text(label="Path for Settings Loader", visible=False)
+
+        outputs_list = [
+            self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
+            self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
+            self.first_frame_preview, self.last_frame_preview, self.join_interface, 
+            self.recreate_join_btn, self.merge_info_display
+        ]
+        no_updates = {comp: gr.update() for comp in outputs_list}
+
+        def on_tab_select(current_state, evt: gr.SelectData):
+            if evt.value == "Gallery" and not self.loaded_once:
+                self.loaded_once = True
+                return self.list_output_files_as_html(current_state)
+            return no_updates
+
+        self.main_tabs.select(
+            fn=on_tab_select,
+            inputs=[self.state],
+            outputs=outputs_list,
+        )
+
+        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=outputs_list)
+        
+        self.selected_files_for_backend.change(fn=self.update_metadata_panel_and_buttons, 
+            inputs=[self.selected_files_for_backend, self.state], 
+            outputs=[
+                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output, 
+                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview, 
+                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
+                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
+            ], show_progress="hidden"
+        )
+        self.join_videos_btn.click(fn=self.show_join_interface, inputs=[self.selected_files_for_backend, self.state], outputs=[
+            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
+            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
+            self.video1_preview, self.video2_preview,
+            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
+            self.video1_info, self.video2_info
+        ])
+        self.recreate_join_btn.click(
+            fn=self.recreate_join_interface, inputs=[self.path_for_settings_loader, self.state], outputs=[
+            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
+            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
+            self.video1_preview, self.video2_preview,
+            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
+            self.video1_info, self.video2_info
+        ])
+        self.send_to_generator_settings_btn.click(fn=self.load_settings_and_frames_from_gallery, inputs=[self.state, self.path_for_settings_loader], outputs=[self.model_family, self.model_choice, self.main_tabs, self.refresh_form_trigger], show_progress="hidden")
+        self.send_to_generator_btn.click(fn=self.send_selected_frames_to_generator, inputs=[self.video1_path, self.video1_frame_slider, self.video2_path, self.video2_frame_slider, self.image_prompt_type], outputs=[self.image_start, self.image_end, self.main_tabs, self.join_interface, self.image_prompt_type, self.image_start_row, self.image_end_row, self.image_prompt_type_radio, self.image_prompt_type_endcheckbox, self.plugin_data])
+        self.cancel_join_btn.click(
+            fn=self.update_metadata_panel_and_buttons,
+            inputs=[self.selected_files_for_backend, self.state],
+            outputs=[
+                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output,
+                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview,
+                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
+                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
+            ]
+        )
+
         return gallery_blocks
 
     def list_output_files_as_html(self, current_state):
@@ -511,65 +571,3 @@ class GalleryPlugin(WAN2GPPlugin):
             self.image_prompt_type_endcheckbox: gr.Checkbox(value=True),
             self.plugin_data: {"merge_info": merge_info}
         }
-
-    def post_ui_setup(self, components: dict):
-        outputs_list = [
-            self.gallery_html_output, self.selected_files_for_backend, self.metadata_panel_output, 
-            self.join_videos_btn, self.send_to_generator_settings_btn, self.frame_preview_row, 
-            self.first_frame_preview, self.last_frame_preview, self.join_interface, 
-            self.recreate_join_btn, self.merge_info_display
-        ]
-        no_updates = {comp: gr.update() for comp in outputs_list}
-
-        def on_tab_select(current_state, evt: gr.SelectData):
-            if evt.value == "Gallery" and not self.loaded_once:
-                self.loaded_once = True
-                return self.list_output_files_as_html(current_state)
-            return no_updates
-
-        self.main_tabs.select(
-            fn=on_tab_select,
-            inputs=[self.state],
-            outputs=outputs_list,
-        )
-
-        self.refresh_gallery_files_btn.click(fn=self.list_output_files_as_html, inputs=[self.state], outputs=outputs_list)
-        
-        self.selected_files_for_backend.change(fn=self.update_metadata_panel_and_buttons, 
-            inputs=[self.selected_files_for_backend, self.state], 
-            outputs=[
-                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output, 
-                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview, 
-                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
-                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
-            ], show_progress="hidden"
-        )
-        self.join_videos_btn.click(fn=self.show_join_interface, inputs=[self.selected_files_for_backend, self.state], outputs=[
-            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
-            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
-            self.video1_preview, self.video2_preview,
-            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
-            self.video1_info, self.video2_info
-        ])
-        self.recreate_join_btn.click(
-            fn=self.recreate_join_interface, inputs=[self.path_for_settings_loader, self.state], outputs=[
-            self.join_interface, self.frame_preview_row, self.merge_info_display, self.metadata_panel_output,
-            self.send_to_generator_settings_btn, self.join_videos_btn, self.recreate_join_btn,
-            self.video1_preview, self.video2_preview,
-            self.video1_path, self.video2_path, self.video1_frame_slider, self.video2_frame_slider,
-            self.video1_info, self.video2_info
-        ])
-        self.send_to_generator_settings_btn.click(fn=self.load_settings_and_frames_from_gallery, inputs=[self.state, self.path_for_settings_loader], outputs=[self.model_family, self.model_choice, self.main_tabs, self.refresh_form_trigger], show_progress="hidden")
-        self.send_to_generator_btn.click(fn=self.send_selected_frames_to_generator, inputs=[self.video1_path, self.video1_frame_slider, self.video2_path, self.video2_frame_slider, self.image_prompt_type], outputs=[self.image_start, self.image_end, self.main_tabs, self.join_interface, self.image_prompt_type, self.image_start_row, self.image_end_row, self.image_prompt_type_radio, self.image_prompt_type_endcheckbox, self.plugin_data])
-        self.cancel_join_btn.click(
-            fn=self.update_metadata_panel_and_buttons,
-            inputs=[self.selected_files_for_backend, self.state],
-            outputs=[
-                self.join_videos_btn, self.send_to_generator_settings_btn, self.metadata_panel_output,
-                self.path_for_settings_loader, self.frame_preview_row, self.first_frame_preview,
-                self.last_frame_preview, self.join_interface, self.recreate_join_btn, self.merge_info_display,
-                self.merge_source1_prompt, self.merge_source1_image, self.merge_source2_prompt, self.merge_source2_image
-            ]
-        )
-        
-        return {}

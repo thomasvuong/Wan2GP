@@ -9,19 +9,14 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
         self.name = "Lora Multipliers UI"
         self.version = "1.0.9"
         self.description = "Dynamically set lora multipliers with a fast, JavaScript-powered UI."
-        self.target_tabs = ['generate', 'edit']
+        self.previous_loras_state = {}
         self.request_component("loras_multipliers")
         self.request_component("loras_choices")
         self.request_component("guidance_phases")
         self.request_component("num_inference_steps")
         self.request_component("main")
-        self.previous_loras_state = {}
 
     def post_ui_setup(self, components: dict) -> dict:
-        tab_id = components.get('__tab_id__', 'unknown_tab')
-        if tab_id not in self.previous_loras_state:
-            self.previous_loras_state[tab_id] = {'loras': [], 'accelerators': []}
-        
         try:
             loras_multipliers = components["loras_multipliers"]
             loras_choices = components["loras_choices"]
@@ -29,11 +24,16 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
             num_inference_steps = components["num_inference_steps"]
             main_ui_block = components["main"]
 
+            instance_id = loras_multipliers._id
+            if instance_id not in self.previous_loras_state:
+                self.previous_loras_state[instance_id] = {'loras': [], 'accelerators': [], 'multipliers': {}}
+
+
             def create_and_wire_ui():
-                container_id = f"lora_multiplier_ui_container_{tab_id}"
-                update_btn_id = f"lora_mults_update_btn_{tab_id}"
-                hidden_input_id = f"lora_mults_hidden_input_{tab_id}"
-                js_renderer_func = f"wgpLoraUIRenderer_{tab_id}"
+                container_id = f"lora_multiplier_ui_container_{instance_id}"
+                update_btn_id = f"lora_mults_update_btn_{instance_id}"
+                hidden_input_id = f"lora_mults_hidden_input_{instance_id}"
+                js_renderer_func = f"wgpLoraUIRenderer_{instance_id}"
                 
                 css = f"""
                 <style>
@@ -98,7 +98,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         }};
                     }};
 
-                    const updatePythonTextbox = debounce(() => {{
+                    const updatePythonTextbox_{instance_id} = debounce(() => {{
                         const container = document.getElementById('{container_id}');
                         if (!container) return;
 
@@ -144,7 +144,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         }}
                     }}, 200);
 
-                    function createSlider(phase, value, isVisible) {{
+                    function createSlider_{instance_id}(phase, value, isVisible) {{
                         const container = document.createElement('div');
                         container.className = 'lora-slider-group';
                         if (!isVisible) container.classList.add('hidden');
@@ -175,7 +175,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                                     numberInput.value = val.toFixed(2);
                                 }}
                             }}
-                            updatePythonTextbox();
+                            updatePythonTextbox_{instance_id}();
                         }};
 
                         rangeInput.addEventListener('input', () => syncAndUpdate(rangeInput));
@@ -184,7 +184,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         return container;
                     }}
 
-                    function createStepSplit(loraIndex, splitIndex, values, guidancePhases, stepText) {{
+                    function createStepSplit_{instance_id}(loraIndex, splitIndex, values, guidancePhases, stepText) {{
                         const splitContainer = document.createElement('div');
                         splitContainer.className = 'lora-step-split-container';
                         const sliderRow = document.createElement('div');
@@ -196,43 +196,21 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         for (let i = 0; i < 3; i++) {{
                             const isVisible = (i + 1) <= guidancePhases;
                             const sliderValue = values[i] !== undefined ? values[i] : 1.0;
-                            sliderRow.appendChild(createSlider(i + 1, sliderValue, isVisible));
+                            sliderRow.appendChild(createSlider_{instance_id}(i + 1, sliderValue, isVisible));
                         }}
                         splitContainer.appendChild(sliderRow);
                         return splitContainer;
                     }}
 
-                    function updateRejoinVisibility(loraContainer) {{
+                    function updateRejoinVisibility_{instance_id}(loraContainer) {{
                         if (!loraContainer) return;
                         const splits = loraContainer.querySelectorAll('.lora-step-split-container');
                         const rejoinBtn = loraContainer.querySelector('.rejoin-btn');
                         if (rejoinBtn) {{ rejoinBtn.style.display = splits.length > 1 ? 'inline-block' : 'none'; }}
                     }}
 
-                    function handleSplit(e) {{
-                        const loraIndex = parseInt(e.target.dataset.loraIndex);
-                        const loraContainer = document.getElementById(`lora-container-{tab_id}-${{loraIndex}}`);
-                        const newSplit = createStepSplit(loraIndex, -1, [1.0, 1.0, 1.0], window.wgp_guidance_phases_{tab_id}, "");
-                        loraContainer.appendChild(newSplit);
-                        recalculateStepRanges(loraContainer);
-                        updateRejoinVisibility(loraContainer);
-                        updatePythonTextbox();
-                    }}
-
-                    function handleRejoin(e) {{
-                        const loraIndex = parseInt(e.target.dataset.loraIndex);
-                        const loraContainer = document.getElementById(`lora-container-{tab_id}-${{loraIndex}}`);
-                        const splits = loraContainer.querySelectorAll('.lora-step-split-container');
-                        if (splits.length > 1) {{
-                            splits[splits.length - 1].remove();
-                            recalculateStepRanges(loraContainer);
-                            updateRejoinVisibility(loraContainer);
-                            updatePythonTextbox();
-                        }}
-                    }}
-
-                    function recalculateStepRanges(loraContainer) {{
-                        const totalSteps = window.wgp_total_steps_{tab_id} || 1;
+                    function recalculateStepRanges_{instance_id}(loraContainer) {{
+                        const totalSteps = window.wgp_total_steps_{instance_id} || 1;
                         const splits = loraContainer.querySelectorAll('.lora-step-split-container');
                         const numSplits = splits.length;
                         if (numSplits === 0) return;
@@ -250,17 +228,39 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                             startStep = endStep;
                         }});
                     }}
+                    
+                    function handleSplit_{instance_id}(e) {{
+                        const loraIndex = parseInt(e.target.dataset.loraIndex);
+                        const loraContainer = document.getElementById(`lora-container-{instance_id}-${{loraIndex}}`);
+                        const newSplit = createStepSplit_{instance_id}(loraIndex, -1, [1.0, 1.0, 1.0], window.wgp_guidance_phases_{instance_id}, "");
+                        loraContainer.appendChild(newSplit);
+                        recalculateStepRanges_{instance_id}(loraContainer);
+                        updateRejoinVisibility_{instance_id}(loraContainer);
+                        updatePythonTextbox_{instance_id}();
+                    }}
+
+                    function handleRejoin_{instance_id}(e) {{
+                        const loraIndex = parseInt(e.target.dataset.loraIndex);
+                        const loraContainer = document.getElementById(`lora-container-{instance_id}-${{loraIndex}}`);
+                        const splits = loraContainer.querySelectorAll('.lora-step-split-container');
+                        if (splits.length > 1) {{
+                            splits[splits.length - 1].remove();
+                            recalculateStepRanges_{instance_id}(loraContainer);
+                            updateRejoinVisibility_{instance_id}(loraContainer);
+                            updatePythonTextbox_{instance_id}();
+                        }}
+                    }}
 
                     window.{js_renderer_func} = (jsonData) => {{
                         let data;
-                        try {{ data = JSON.parse(jsonData); }} catch (e) {{ return; }}
+                        try {{ data = JSON.parse(jsonData); }} catch (e) {{ console.error('Error parsing Lora UI JSON:', e); return; }}
                         if (!data) return;
                         const container = document.getElementById('{container_id}');
                         if (!container) return;
                         
                         container.innerHTML = '';
-                        window.wgp_guidance_phases_{tab_id} = data.guidance_phases;
-                        window.wgp_total_steps_{tab_id} = data.total_steps;
+                        window.wgp_guidance_phases_{instance_id} = data.guidance_phases;
+                        window.wgp_total_steps_{instance_id} = data.total_steps;
                         container.dataset.separatorIndex = data.separator_index;
 
                         const createHeader = (text) => {{
@@ -280,16 +280,16 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                             }}
                             const loraContainer = document.createElement('div');
                             loraContainer.className = 'lora-main-container';
-                            loraContainer.id = `lora-container-{tab_id}-${{i}}`;
+                            loraContainer.id = `lora-container-{instance_id}-${{i}}`;
                             loraContainer.innerHTML = `<div class="gr-row"><h3>${{lora.name}}</h3><div style="display:flex; gap: 8px;"><button class="wgp-lora-button split-btn" data-lora-index="${{i}}" type="button">Split Steps</button><button class="wgp-lora-button rejoin-btn" data-lora-index="${{i}}" type="button" style="display:none;">Rejoin Step</button></div></div>`;
                             lora.splits.forEach((split) => {{
-                                loraContainer.appendChild(createStepSplit(i, -1, split.values, data.guidance_phases, ""));
+                                loraContainer.appendChild(createStepSplit_{instance_id}(i, -1, split.values, data.guidance_phases, ""));
                             }});
                             container.appendChild(loraContainer);
-                            recalculateStepRanges(loraContainer);
-                            updateRejoinVisibility(loraContainer);
-                            loraContainer.querySelector('.split-btn').addEventListener('click', handleSplit);
-                            loraContainer.querySelector('.rejoin-btn').addEventListener('click', handleRejoin);
+                            recalculateStepRanges_{instance_id}(loraContainer);
+                            updateRejoinVisibility_{instance_id}(loraContainer);
+                            loraContainer.querySelector('.split-btn').addEventListener('click', handleSplit_{instance_id});
+                            loraContainer.querySelector('.rejoin-btn').addEventListener('click', handleRejoin_{instance_id});
                         }});
                     }};
                 }}
@@ -303,7 +303,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         all_stale_multipliers = [s for s in (multipliers_str or "").replace('|', ' ').split(' ') if s]
                         num_stale_multipliers = len(all_stale_multipliers)
 
-                        previous_state = self.previous_loras_state.get(tab_id, {'loras': [], 'accelerators': [], 'multipliers': {}})
+                        previous_state = self.previous_loras_state.get(instance_id, {'loras': [], 'accelerators': [], 'multipliers': {}})
                         old_mult_map = previous_state.get('multipliers', {})
 
                         previous_loras_set = set(previous_state.get('loras', []))
@@ -361,7 +361,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         }
 
                         final_accelerators = lora_names_for_ui[:new_separator_index if new_separator_index != -1 else 0]
-                        self.previous_loras_state[tab_id] = {
+                        self.previous_loras_state[instance_id] = {
                             'loras': lora_names_for_ui,
                             'accelerators': final_accelerators,
                             'multipliers': final_mult_map
@@ -383,7 +383,7 @@ class LoraMultipliersUIPlugin(WAN2GPPlugin):
                         hidden_input = gr.Text(elem_id=hidden_input_id)
                         update_button = gr.Button(elem_id=update_btn_id)
                     
-                    ui_data_json = gr.Text(elem_id=f"ui_data_json_{tab_id}", visible=False)
+                    ui_data_json = gr.Text(elem_id=f"ui_data_json_{instance_id}", visible=False)
 
                 main_ui_block.load(fn=None, js=main_js_script)
 

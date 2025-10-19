@@ -36,6 +36,15 @@ class DownloadsPlugin(WAN2GPPlugin):
                 gr.Markdown("")
         with gr.Row() as self.download_status_row: 
             self.download_status = gr.Markdown()
+        self.download_loras_btn.click(
+            fn=self.download_loras_action, 
+            inputs=[], 
+            outputs=[self.download_status_row, self.download_status]
+        ).then(
+            fn=self.refresh_lora_list, 
+            inputs=[self.state, self.lset_name, self.loras_choices], 
+            outputs=[self.lset_name, self.loras_choices]
+        )
 
     def download_loras_action(self):
         from huggingface_hub import snapshot_download    
@@ -64,14 +73,3 @@ class DownloadsPlugin(WAN2GPPlugin):
         with open(log_path, "w", encoding="utf-8") as writer:
             writer.write(f"Loras downloaded on the {dt} at {time.time()} on the {time.time()}")
         return
-
-    def post_ui_setup(self, components: dict):
-        self.download_loras_btn.click(
-            fn=self.download_loras_action, 
-            inputs=[], 
-            outputs=[self.download_status_row, self.download_status]
-        ).then(
-            fn=self.refresh_lora_list, 
-            inputs=[self.state, self.lset_name, self.loras_choices], 
-            outputs=[self.lset_name, self.loras_choices]
-        )

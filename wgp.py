@@ -9382,8 +9382,17 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                  inputs=None,
                  outputs=[current_gen_column, queue_accordion]
             )
-    locals()['__tab_id__'] = tab_id
-    return locals()
+    locals_dict = locals()
+    if not update_form and hasattr(app, 'plugin_manager'):
+        app.run_component_insertion(locals_dict)
+
+    if update_form:
+        locals_dict = locals()
+        gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict, plugin_data] + extra_inputs
+        return gen_inputs
+    else:
+        return locals()
+
 
 def compact_name(family_name, model_name):
     if model_name.startswith(family_name):
@@ -10181,6 +10190,10 @@ def create_ui():
     js += """
     }
     """
+    if hasattr(app, 'plugin_manager'):
+        enabled_plugins = server_config.get("enabled_plugins", [])
+        app.plugin_manager.load_plugins_from_directory(enabled_plugins)
+        app.plugin_manager.inject_globals(globals())
     if server_config.get("display_stats", 0) == 1:
         from shared.utils.stats import SystemStatsApp
         stats_app = SystemStatsApp() 
@@ -10307,12 +10320,15 @@ def create_ui():
                 outputs=[generator_tab_components['queue_html'], main_tabs, edit_tab],
                 show_progress="hidden"
             )
-            gl = globals()
-            gl['main_tabs'] = main_tabs
-            gl['refresh_form_trigger'] = refresh_form_trigger
-            gl['save_form_trigger'] = save_form_trigger
-            gl['state'] = state
-            app.finalize_ui_setup(gl, [generator_tab_components, edit_tab_components])
+            if hasattr(app, 'plugin_manager'):
+                app._create_plugin_tabs(enabled_plugins)
+                if main_tabs and state:
+                    main_tabs.select(
+                        fn=app._handle_tab_selection,
+                        inputs=[state],
+                        outputs=None,
+                        show_progress="hidden",
+                    )
         if stats_app is not None:
             stats_app.setup_events(main, state)
         return main
