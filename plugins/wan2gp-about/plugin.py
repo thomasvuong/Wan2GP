@@ -13,7 +13,7 @@ class AboutPlugin(WAN2GPPlugin):
             tab_id="about_tab",
             label="About",
             component_constructor=self.create_about_ui,
-            position=5
+            position=6
         )
 
     def create_about_ui(self):

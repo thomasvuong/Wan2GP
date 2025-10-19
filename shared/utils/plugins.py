@@ -20,6 +20,8 @@ SYSTEM_PLUGINS = [
     "wan2gp-video-mask-creator",
 ]
 
+USER_PLUGIN_INSERT_POSITION = 4
+
 @dataclass
 class InsertAfterRequest:
     target_component_id: str
@@ -426,14 +428,16 @@ class WAN2GPApplication:
                     user_tabs.append((plugin_id, tab_info))
 
         system_tabs.sort(key=lambda t: (t.get('position', -1), t['label']))
-        
         sorted_user_tabs = []
         for plugin_id in enabled_user_plugins:
             for pid, tab_info in user_tabs:
                 if pid == plugin_id:
                     sorted_user_tabs.append(tab_info)
-        
-        all_tabs_to_render = system_tabs + sorted_user_tabs
+
+        pre_user_tabs = [t for t in system_tabs if t.get('position', -1) < USER_PLUGIN_INSERT_POSITION]
+        post_user_tabs = [t for t in system_tabs if t.get('position', -1) >= USER_PLUGIN_INSERT_POSITION]
+
+        all_tabs_to_render = pre_user_tabs + sorted_user_tabs + post_user_tabs
         
         for tab_info in all_tabs_to_render:
             with gr.Tab(tab_info['label'], id=f"plugin_{tab_info['id']}"):
