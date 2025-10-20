@@ -99,7 +99,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                     const payload = JSON.stringify({ action: action, plugin_id: pluginId });
                     updateGradioInput('plugin_action_input', payload);
                 };
-
+                
                 window.handleStoreInstall = function(button, url) {
                     const payload = JSON.stringify({ action: 'install_from_store', url: url });
                     updateGradioInput('plugin_action_input', payload);
@@ -135,19 +135,25 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
 
         items_html = ""
         for plugin in plugins:
-            if not all(k in plugin for k in ['name', 'author', 'description', 'url']):
-                continue
+            name = plugin.get('name')
+            author = plugin.get('author')
+            version = plugin.get('version', 'N/A') # <-- Get version
+            description = plugin.get('description')
+            url = plugin.get('url')
 
-            safe_url = plugin['url'].replace("'", "\\'")
+            if not all([name, author, description, url]):
+                continue
+            
+            safe_url = url.replace("'", "\\'")
 
             items_html += f"""
             <div class="plugin-item">
                 <div class="plugin-item-info">
                     <div class="plugin-header">
-                        <span class="name">{plugin['name']}</span>
-                        <span class="version">by {plugin['author']}</span>
+                        <span class="name">{name}</span>
+                        <span class="version">version {version} by {author}</span>
                     </div>
-                    <span class="description">{plugin['description']}</span>
+                    <span class="description">{description}</span>
                 </div>
                 <div class="plugin-item-actions">
                     <button class="plugin-action-btn" onclick="handleStoreInstall(this, '{safe_url}')">Install</button>
@@ -239,7 +245,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                         self.save_and_restart_button = gr.Button("Save and Restart", variant="primary", size="sm", scale=0, elem_classes="stylish-save-btn")
                 with gr.Column(scale=2, min_width=300):
                     gr.Markdown("### Discover & Install")
-
+                    
                     with gr.Column(visible=True) as self.manual_install_view:
                         gr.Markdown("Enter the URL of a GitHub repository containing a Wan2GP plugin.")
                         with gr.Group():
@@ -351,7 +357,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             payload = json.loads(payload_str)
             action = payload.get("action")
             plugin_id = payload.get("plugin_id")
-
+            
             if action == 'install_from_store':
                 url = payload.get("url")
                 if not url:
