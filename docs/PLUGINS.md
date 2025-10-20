@@ -11,7 +11,7 @@ This system allows you to extend and customize the Wan2GP user interface and fun
     *   [Core Methods](#core-methods)
 5.  [Examples](#examples)
     *   [Example 1: Creating a New Tab](#example-1-creating-a-new-tab)
-    *   [Example 2: Modifying an Existing Component](#example-2-modifying-an-existing-component)
+    *   [Example 2: Injecting UI Elements](#example-2-injecting-ui-elements)
     *   [Example 3: Advanced UI Injection and Interaction](#example-3-advanced-ui-injection-and-interaction)
     *   [Example 4: Accessing Global Functions and Variables](#example-4-accessing-global-functions-and-variables)
     *   [Example 5: Using Helper Modules (Relative Imports)](#example-5-using-helper-modules-relative-imports)
@@ -19,7 +19,7 @@ This system allows you to extend and customize the Wan2GP user interface and fun
 
 ## Plugin Structure
 
-Plugins are no longer single files. They are now standard Python packages (folders) located within the main `plugins/` directory. This structure allows for multiple files, dependencies, and proper packaging.
+Plugins are standard Python packages (folders) located within the main `plugins/` directory. This structure allows for multiple files, dependencies, and proper packaging.
 
 A valid plugin folder must contain at a minimum:
 *   `__init__.py`: An empty file that tells Python to treat the directory as a package.
@@ -33,7 +33,6 @@ plugins/
     ├── __init__.py         # (Required, can be empty) Makes this a Python package.
     ├── plugin.py           # (Required) Main plugin logic and class definition.
     ├── requirements.txt    # (Optional) Lists pip dependencies for your plugin.
-    ├── setup.py            # (Optional) For more complex installation or packaging.
     └── ...                 # Other helper .py files, assets, etc.
 ```
 
@@ -45,7 +44,18 @@ plugins/
     *   Inside `my-awesome-plugin/`, create an empty file named `__init__.py`.
     *   Create another file named `plugin.py`. This will be the entry point for your plugin.
 
-3.  **Define a Plugin Class**: In `plugin.py`, create a class that inherits from `WAN2GPPlugin`.
+3.  **Define a Plugin Class**: In `plugin.py`, create a class that inherits from `WAN2GPPlugin` and set its metadata attributes.
+
+    ```python
+    from shared.utils.plugins import WAN2GPPlugin
+
+    class MyPlugin(WAN2GPPlugin):
+        def __init__(self):
+            super().__init__()
+            self.name = "My Awesome Plugin"
+            self.version = "1.0.0"
+            self.description = "This plugin adds awesome new features."
+    ```
 
 4.  **Add Dependencies (Optional)**: If your plugin requires external Python libraries (e.g., `numpy`), list them in a `requirements.txt` file inside your plugin folder. These will be installed automatically when a user installs your plugin via the UI.
 
@@ -66,8 +76,10 @@ Users can install your plugin directly from the Wan2GP interface:
 1.  Go to the **Plugins** tab.
 2.  Under "Install New Plugin," paste the full URL of your plugin's GitHub repository.
 3.  Click "Download and Install Plugin."
-4.  The system will clone the repository, install any dependencies from `requirements.txt`, and run `setup.py` if present.
-5.  The new plugin will appear in the "Available Plugins" list. The user must then enable it and restart the application.
+4.  The system will clone the repository and install any dependencies from `requirements.txt`.
+5.  The new plugin will appear in the "Available Plugins" list. The user must then enable it and restart the application to activate it.
+
+The plugin manager also supports updating plugins (if installed from git) and uninstalling them.
 
 ## Plugin API Reference
 
@@ -82,32 +94,44 @@ import gradio as gr
 class MyAwesomePlugin(WAN2GPPlugin):
     def __init__(self):
         super().__init__()
+        # Metadata for the Plugin Manager UI
         self.name = "My Awesome Plugin"
         self.version = "1.0.0"
-        # ... your initialization code here
+        self.description = "A short description of what my plugin does."
+        
+    def setup_ui(self):
+        # UI setup calls go here
+        pass
+        
+    def post_ui_setup(self, components: dict):
+        # Event wiring and UI injection calls go here
+        pass
 ```
 
 ### Core Methods
 These are the methods you can override or call to build your plugin.
 
 #### `setup_ui(self)`
-This method is called when your plugin is first loaded. It's the place to declare new tabs or request access to components and globals.
+This method is called when your plugin is first loaded. It's the place to declare new tabs or request access to components and globals before the main UI is built.
 
-*   **`self.add_tab(tab_id, label, component_constructor, position)`**: Adds a new top-level tab.
-*   **`self.request_component(component_id)`**: Requests access to an existing Gradio component. The component will be available as an attribute (e.g., `self.loras_multipliers`) in `post_ui_setup`.
-*   **`self.request_global(global_name)`**: Requests access to a global variable or function from the main application. The global will be available as an attribute (e.g., `self.server_config`).
+*   **`self.add_tab(tab_id, label, component_constructor, position)`**: Adds a new top-level tab to the UI.
+*   **`self.request_component(component_id)`**: Requests access to an existing Gradio component by its `elem_id`. The component will be available as an attribute (e.g., `self.loras_multipliers`) in `post_ui_setup`.
+*   **`self.request_global(global_name)`**: Requests access to a global variable or function from the main `wgp.py` application. The global will be available as an attribute (e.g., `self.server_config`).
 
 #### `post_ui_setup(self, components)`
-This method runs after the entire main UI has been built. Use it to wire up events and make initial modifications.
+This method runs after the entire main UI has been built. Use it to wire up events for your custom UI and to inject new components into the existing layout.
 
-*   `components` (dict): A dictionary of the components you requested.
-*   **Return Value**: Can be used to update components on load, but it's now recommended to use `self.insert_after` for UI changes and wire events directly.
+*   `components` (dict): A dictionary of the components you requested via `request_component`.
+*   **`self.insert_after(target_component_id, new_component_constructor)`**: A powerful method to dynamically inject new UI elements into the page.
 
-#### `self.insert_after(target_component_id, new_component_constructor)`
-Call this inside `post_ui_setup` to dynamically inject UI elements.
+#### `on_tab_select(self, state)` and `on_tab_deselect(self, state)`
+If you used `add_tab`, these methods will be called automatically when your tab is selected or deselected, respectively. This is useful for loading data or managing resources.
 
-*   `target_component_id` (str): The `elem_id` of the existing component after which your new UI will be inserted.
-*   `new_component_constructor` (callable): A function that creates and returns the new Gradio component(s).
+#### `set_global(self, variable_name, new_value)`
+Allows your plugin to safely modify a global variable in the main `wgp.py` application.
+
+#### `register_data_hook(self, hook_name, callback)`
+Allows you to intercept and modify data at key points. For example, the `before_metadata_save` hook lets you add custom data to the metadata before it's saved to a file.
 
 ## Examples
 
@@ -132,13 +156,14 @@ class GreeterPlugin(WAN2GPPlugin):
         super().__init__()
         self.name = "Greeter Plugin"
         self.version = "1.0.0"
+        self.description = "Adds a simple 'Greeter' tab."
 
     def setup_ui(self):
         self.add_tab(
             tab_id="greeter_tab",
             label="Greeter",
             component_constructor=self.create_greeter_ui,
-            position=2 # Place it as the 3rd tab
+            position=2 # Place it as the 3rd tab (0-indexed)
         )
         
     def create_greeter_ui(self):
@@ -157,52 +182,44 @@ class GreeterPlugin(WAN2GPPlugin):
         return demo
 ```
 
-### Example 2: Modifying an Existing Component
+### Example 2: Injecting UI Elements
+
+This example adds a simple HTML element right after the "Loras Multipliers" textbox.
 
 **File Structure:**
 ```
 plugins/
-└── simple_modifier_plugin/
+└── injector_plugin/
     ├── __init__.py
     └── plugin.py
 ```
 
 **Code:**
 ```python
-# in plugins/simple_modifier_plugin/plugin.py
+# in plugins/injector_plugin/plugin.py
 import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
 
-class SimpleModifierPlugin(WAN2GPPlugin):
+class InjectorPlugin(WAN2GPPlugin):
     def __init__(self):
         super().__init__()
-        self.name = "Simple Modifier"
+        self.name = "UI Injector"
         self.version = "1.0.0"
-
-    def setup_ui(self):
-        self.request_component("loras_multipliers")
+        self.description = "Injects a message into the main UI."
 
     def post_ui_setup(self, components: dict):
-        # The component is now an attribute of self
-        if not hasattr(self, 'loras_multipliers'):
-            return {}
-            
         def create_inserted_component():
-            return gr.HTML(value="<div style='padding: 10px; background: #eee;'>Inserted by a plugin!</div>")
+            return gr.HTML(value="<div style='padding: 10px; color: gray; text-align: center;'>--- Injected by a plugin! ---</div>")
 
         self.insert_after(
             target_component_id="loras_multipliers",
             new_component_constructor=create_inserted_component
         )
-
-        # To update the component on load, you can also wire into the main 'load' event
-        # but for simplicity, the original return method is shown here.
-        return {
-            self.loras_multipliers: gr.update(value="Hello from the Simple Modifier plugin!")
-        }
 ```
 
 ### Example 3: Advanced UI Injection and Interaction
+
+This plugin injects a button that interacts with other components on the page.
 
 **File Structure:**
 ```
@@ -219,27 +236,35 @@ import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
 
 class AdvancedUIPlugin(WAN2GPPlugin):
+    def __init__(self):
+        super().__init__()
+        self.name = "LoRA Helper"
+        self.description = "Adds a button to copy selected LoRAs."
+        
     def setup_ui(self):
+        # Request access to the components we want to read from and write to.
         self.request_component("loras_multipliers")
         self.request_component("loras_choices")
-        self.request_component("main") 
 
     def post_ui_setup(self, components: dict):
+        # This function will create our new UI and wire its events.
         def create_and_wire_advanced_ui():
-            with gr.Accordion("Advanced Plugin Panel", open=True) as panel:
-                info_md = gr.Markdown("This panel is inserted by a plugin.")
-                copy_btn = gr.Button("Copy selected LoRAs to multiplier textbox")
+            with gr.Accordion("LoRA Helper Panel (Plugin)", open=False):
+                copy_btn = gr.Button("Copy selected LoRA names to Multipliers")
 
+            # Define the function for the button's click event.
             def copy_lora_names(selected_loras):
-                return ", ".join(selected_loras)
+                return " ".join(selected_loras)
 
+            # Wire the event. We can access the components as attributes of `self`.
             copy_btn.click(
                 fn=copy_lora_names,
                 inputs=[self.loras_choices],
                 outputs=[self.loras_multipliers]
             )
-            return panel
+            return panel # Return the top-level component to be inserted.
 
+        # Tell the manager to insert our UI after the 'loras_multipliers' textbox.
         self.insert_after(
             target_component_id="loras_multipliers",
             new_component_constructor=create_and_wire_advanced_ui
@@ -263,24 +288,46 @@ import gradio as gr
 from shared.utils.plugins import WAN2GPPlugin
 
 class GlobalAccessPlugin(WAN2GPPlugin):
+    def __init__(self):
+        super().__init__()
+        self.name = "Global Access Plugin"
+        self.description = "Demonstrates reading and writing global state."
+
     def setup_ui(self):
+        # Request read access to globals
         self.request_global("server_config")
         self.request_global("get_video_info")
+        
+        # Add a tab to host our UI
         self.add_tab("global_access_tab", "Global Access", self.create_ui)
         
     def create_ui(self):
         with gr.Blocks() as demo:
-            video_input = gr.Video(label="Upload a video")
+            gr.Markdown("### Read Globals")
+            video_input = gr.Video(label="Upload a video to analyze")
             info_output = gr.JSON(label="Video Info")
             
             def analyze_video(video_path):
                 if not video_path: return "Upload a video."
+                # Access globals as attributes of `self`
                 save_path = self.server_config.get("save_path", "outputs")
                 fps, w, h, frames = self.get_video_info(video_path)
                 return {"save_path": save_path, "fps": fps, "dimensions": f"{w}x{h}"}
 
             analyze_btn = gr.Button("Analyze Video")
             analyze_btn.click(fn=analyze_video, inputs=[video_input], outputs=[info_output])
+
+            gr.Markdown("--- \n ### Write Globals")
+            theme_changer = gr.Dropdown(choices=["default", "gradio"], label="Change UI Theme (Requires Restart)")
+            save_theme_btn = gr.Button("Save Theme Change")
+
+            def save_theme(theme_choice):
+                # Use the safe `set_global` method
+                self.set_global("UI_theme", theme_choice)
+                gr.Info(f"Theme set to '{theme_choice}'. Restart required.")
+
+            save_theme_btn.click(fn=save_theme, inputs=[theme_changer])
+
         return demo
 ```
 
@@ -311,6 +358,11 @@ from shared.utils.plugins import WAN2GPPlugin
 from .helpers import format_greeting # <-- Relative import works!
 
 class HelperPlugin(WAN2GPPlugin):
+    def __init__(self):
+        super().__init__()
+        self.name = "Helper Module Example"
+        self.description = "Shows how to use relative imports."
+
     def setup_ui(self):
         self.add_tab("helper_tab", "Helper Example", self.create_ui)
 
@@ -326,7 +378,14 @@ class HelperPlugin(WAN2GPPlugin):
 
 ## Finding Component IDs
 
-To interact with an existing component, you need its `elem_id`. You can find these IDs by:
+To interact with an existing component using `request_component` or `insert_after`, you need its `elem_id`. You can find these IDs by:
 
-1.  **Inspecting the Source Code**: Look through `wgp.py` and other UI-related files for Gradio components defined with an `elem_id`.
-2.  **Browser Developer Tools**: If an `elem_id` is not set, run Wan2GP, open your browser's developer tools (F12), and inspect the HTML to find the ID of the element you want to target.
+1.  **Inspecting the Source Code**: Look through `wgp.py` for Gradio components defined with an `elem_id`.
+2.  **Browser Developer Tools**: Run Wan2GP, open your browser's developer tools (F12), and use the "Inspect Element" tool to find the `id` of the HTML element you want to target.
+
+Some common `elem_id`s include:
+*   `loras_multipliers`
+*   `loras_choices`
+*   `main_tabs`
+*   `gallery`
+*   `family_list`, `model_base_types_list`, `model_list`
