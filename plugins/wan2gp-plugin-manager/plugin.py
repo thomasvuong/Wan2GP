@@ -4,6 +4,9 @@ import os
 import json
 import traceback
 from wgp import quit_application
+import requests
+
+COMMUNITY_PLUGINS_URL = "https://github.com/deepbeepmeep/Wan2GP/raw/refs/heads/v9/plugins.json"
 
 class PluginManagerUIPlugin(WAN2GPPlugin):
     def __init__(self):
@@ -97,6 +100,11 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                     updateGradioInput('plugin_action_input', payload);
                 };
 
+                window.handleStoreInstall = function(button, url) {
+                    const payload = JSON.stringify({ action: 'install_from_store', url: url });
+                    updateGradioInput('plugin_action_input', payload);
+                };
+
                 window.handleSave = function(restart) {
                     const user_container = document.querySelector('#user-plugin-list');
                     if (!user_container) return;
@@ -112,6 +120,42 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             }
         """
         return f"{js_code}"
+
+    def _build_community_plugins_html(self):
+        try:
+            response = requests.get(COMMUNITY_PLUGINS_URL, timeout=10)
+            response.raise_for_status()
+            plugins = response.json()
+        except requests.exceptions.RequestException as e:
+            gr.Warning(f"Could not fetch community plugins list: {e}")
+            return "<p style='text-align:center; color: var(--color-accent-soft);'>Failed to load community plugins.</p>"
+        except json.JSONDecodeError:
+            gr.Warning("Failed to parse the community plugins list. The file may be malformed.")
+            return "<p style='text-align:center; color: var(--color-accent-soft);'>Error reading community plugins list.</p>"
+
+        items_html = ""
+        for plugin in plugins:
+            if not all(k in plugin for k in ['name', 'author', 'description', 'url']):
+                continue
+
+            safe_url = plugin['url'].replace("'", "\\'")
+
+            items_html += f"""
+            <div class="plugin-item">
+                <div class="plugin-item-info">
+                    <div class="plugin-header">
+                        <span class="name">{plugin['name']}</span>
+                        <span class="version">by {plugin['author']}</span>
+                    </div>
+                    <span class="description">{plugin['description']}</span>
+                </div>
+                <div class="plugin-item-actions">
+                    <button class="plugin-action-btn" onclick="handleStoreInstall(this, '{safe_url}')">Install</button>
+                </div>
+            </div>
+            """
+        
+        return f"<div class='plugin-list'>{items_html}</div>"
 
     def _build_plugins_html(self):
         plugins_info = self.app.plugin_manager.get_plugins_info()
@@ -194,11 +238,20 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                         self.save_plugins_button = gr.Button("Save", variant="secondary", size="sm", scale=0, elem_classes="stylish-save-btn")
                         self.save_and_restart_button = gr.Button("Save and Restart", variant="primary", size="sm", scale=0, elem_classes="stylish-save-btn")
                 with gr.Column(scale=2, min_width=300):
-                    gr.Markdown("### Install New Plugin")
-                    gr.Markdown("Enter the URL of a GitHub repository containing a Wan2GP plugin.")
-                    with gr.Group():
-                        self.plugin_url_textbox = gr.Textbox(label="GitHub URL", placeholder="https://github.com/user/wan2gp-plugin-repo")
-                        self.install_plugin_button = gr.Button("Download and Install")
+                    gr.Markdown("### Discover & Install")
+
+                    with gr.Column(visible=True) as self.manual_install_view:
+                        gr.Markdown("Enter the URL of a GitHub repository containing a Wan2GP plugin.")
+                        with gr.Group():
+                            self.plugin_url_textbox = gr.Textbox(label="GitHub URL", placeholder="https://github.com/user/wan2gp-plugin-repo")
+                            self.install_plugin_button = gr.Button("Download and Install from URL")
+                        self.browse_community_button = gr.Button("Browse Community Plugins", variant="secondary")
+                    
+                    with gr.Column(visible=False) as self.community_browser_view:
+                        gr.Markdown("A list of community-contributed plugins. Click install to add them.")
+                        self.community_plugins_html = gr.HTML()
+                        self.back_to_manual_button = gr.Button("‹ Back to Manual Install")
+
             with gr.Column(visible=False):
                 self.plugin_action_input = gr.Textbox(elem_id="plugin_action_input")
                 self.save_action_input = gr.Textbox(elem_id="save_action_input")
@@ -235,8 +288,21 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             outputs=[self.plugins_html_display, self.plugin_url_textbox]
         )
 
+        self.browse_community_button.click(
+            fn=self._browse_community_plugins,
+            outputs=[self.community_plugins_html, self.manual_install_view, self.community_browser_view]
+        )
+        self.back_to_manual_button.click(
+            fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
+            outputs=[self.manual_install_view, self.community_browser_view]
+        )
+
         return plugin_blocks
 
+    def _browse_community_plugins(self):
+        html = self._build_community_plugins_html()
+        return html, gr.update(visible=False), gr.update(visible=True)
+    
     def _refresh_ui(self):
         return gr.update(value=self._build_plugins_html())
 
@@ -285,21 +351,28 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             payload = json.loads(payload_str)
             action = payload.get("action")
             plugin_id = payload.get("plugin_id")
-            if not action or not plugin_id:
-                 raise ValueError("Action and plugin_id are required.")
-            result_message = ""
-            if action == 'uninstall':
-                result_message = self.app.plugin_manager.uninstall_plugin(plugin_id)
-                current_enabled = self.server_config.get("enabled_plugins", [])
-                if plugin_id in current_enabled:
-                    current_enabled.remove(plugin_id)
-                    self.server_config["enabled_plugins"] = current_enabled
-                    with open(self.server_config_filename, "w", encoding="utf-8") as writer:
-                        writer.write(json.dumps(self.server_config, indent=4))
-            elif action == 'update':
-                result_message = self.app.plugin_manager.update_plugin(plugin_id)
-            elif action == 'reinstall':
-                result_message = self.app.plugin_manager.reinstall_plugin(plugin_id)
+
+            if action == 'install_from_store':
+                url = payload.get("url")
+                if not url:
+                    raise ValueError("URL is required for install_from_store action.")
+                result_message = self.app.plugin_manager.install_plugin_from_url(url)
+            else:
+                if not action or not plugin_id:
+                     raise ValueError("Action and plugin_id are required.")
+                result_message = ""
+                if action == 'uninstall':
+                    result_message = self.app.plugin_manager.uninstall_plugin(plugin_id)
+                    current_enabled = self.server_config.get("enabled_plugins", [])
+                    if plugin_id in current_enabled:
+                        current_enabled.remove(plugin_id)
+                        self.server_config["enabled_plugins"] = current_enabled
+                        with open(self.server_config_filename, "w", encoding="utf-8") as writer:
+                            writer.write(json.dumps(self.server_config, indent=4))
+                elif action == 'update':
+                    result_message = self.app.plugin_manager.update_plugin(plugin_id)
+                elif action == 'reinstall':
+                    result_message = self.app.plugin_manager.reinstall_plugin(plugin_id)
             
             if "[Success]" in result_message:
                 gr.Info(result_message)
