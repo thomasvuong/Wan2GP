@@ -215,16 +215,34 @@ class PluginManager:
 
         if progress is not None: progress(0, desc=f"Reinstalling '{plugin_id}'...")
 
-        if progress is not None: progress(0.2, desc=f"Uninstalling '{plugin_id}'...")
-        uninstall_msg = self.uninstall_plugin(plugin_id)
-        if "[Error]" in uninstall_msg:
-            return uninstall_msg
+        backup_dir = f"{target_dir}.bak"
+        if os.path.exists(backup_dir):
+            try:
+                shutil.rmtree(backup_dir, onerror=self._remove_readonly)
+            except Exception as e:
+                return f"[Error] Could not remove old backup directory '{backup_dir}'. Please remove it manually and try again. Error: {e}"
+
+        try:
+            if progress is not None: progress(0.2, desc=f"Moving old version of '{plugin_id}' aside...")
+            os.rename(target_dir, backup_dir)
+        except OSError as e:
+            traceback.print_exc()
+            return f"[Error] Could not move the existing plugin directory for '{plugin_id}'. It may be in use by another process. Please close any file explorers or editors in that folder and try again. Error: {e}"
         
         install_msg = self.install_plugin_from_url(git_url, progress=progress)
+        
         if "[Success]" in install_msg:
+            try:
+                shutil.rmtree(backup_dir, onerror=self._remove_readonly)
+            except Exception:
+                pass
             return f"[Success] Plugin '{plugin_id}' reinstalled. Please restart WanGP."
         else:
-            return f"[Error] Reinstallation failed during install step: {install_msg}"
+            try:
+                os.rename(backup_dir, target_dir)
+                return f"[Error] Reinstallation failed during install step: {install_msg}. The original plugin has been restored."
+            except Exception as restore_e:
+                return f"[CRITICAL ERROR] Reinstallation failed AND could not restore backup. Plugin '{plugin_id}' is now in a broken state. Please manually rename '{backup_dir}' back to '{target_dir}'. Original error: {install_msg}. Restore error: {restore_e}"
 
     def install_plugin_from_url(self, git_url: str, progress=None):
         if not git_url or not git_url.startswith("https://github.com/"):
