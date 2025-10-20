@@ -381,29 +381,36 @@ class WAN2GPApplication:
         self.plugin_manager = PluginManager()
         self.tab_to_plugin_map: Dict[str, WAN2GPPlugin] = {}
         self.all_rendered_tabs: List[gr.Tab] = []
+        self.enabled_plugins: List[str] = []
 
-    def run_component_insertion(self, components_dict: Dict[str, Any]):
-        if self.plugin_manager:
-            self.plugin_manager.run_component_insertion_and_setup(components_dict)
+    def initialize_plugins(self, wgp_globals: dict):
+        if not hasattr(self, 'plugin_manager'):
+            return
+        
+        server_config = wgp_globals.get("server_config")
+        if not server_config:
+            print("[PluginManager] ERROR: server_config not found in globals.")
+            return
 
-    def _create_plugin_tabs(self, enabled_plugins):
-        if not self.plugin_manager:
+        self.enabled_plugins = server_config.get("enabled_plugins", [])
+        self.plugin_manager.load_plugins_from_directory(self.enabled_plugins)
+        self.plugin_manager.inject_globals(wgp_globals)
+
+    def setup_ui_tabs(self, main_tabs_component: gr.Tabs, state_component: gr.State):
+        self._create_plugin_tabs()
+        self._setup_tab_events(main_tabs_component, state_component)
+    
+    def _create_plugin_tabs(self):
+        if not hasattr(self, 'plugin_manager'):
             return
         
         loaded_plugins = self.plugin_manager.get_all_plugins()
-        
-        system_tabs = []
-        user_tabs = []
+        system_tabs, user_tabs = [], []
 
         for plugin_id, plugin in loaded_plugins.items():
             for tab_id, tab in plugin.tabs.items():
                 self.tab_to_plugin_map[tab.label] = plugin
-                tab_info = {
-                    'id': tab_id,
-                    'label': tab.label,
-                    'component_constructor': tab.component_constructor,
-                    'position': tab.position
-                }
+                tab_info = {'id': tab_id, 'label': tab.label, 'component_constructor': tab.component_constructor, 'position': tab.position}
                 if plugin_id in SYSTEM_PLUGINS:
                     system_tabs.append(tab_info)
                 else:
@@ -411,11 +418,7 @@ class WAN2GPApplication:
 
         system_tabs.sort(key=lambda t: (t.get('position', -1), t['label']))
 
-        sorted_user_tabs = []
-        for plugin_id in enabled_plugins:
-            for pid, tab_info in user_tabs:
-                if pid == plugin_id:
-                    sorted_user_tabs.append(tab_info)
+        sorted_user_tabs = [tab_info for plugin_id in self.enabled_plugins for pid, tab_info in user_tabs if pid == plugin_id]
 
         pre_user_tabs = [t for t in system_tabs if t.get('position', -1) < USER_PLUGIN_INSERT_POSITION]
         post_user_tabs = [t for t in system_tabs if t.get('position', -1) >= USER_PLUGIN_INSERT_POSITION]
@@ -427,6 +430,15 @@ class WAN2GPApplication:
                 self.all_rendered_tabs.append(new_tab)
                 tab_info['component_constructor']()
 
+    def _setup_tab_events(self, main_tabs_component: gr.Tabs, state_component: gr.State):
+        if main_tabs_component and state_component:
+            main_tabs_component.select(
+                fn=self._handle_tab_selection,
+                inputs=[state_component],
+                outputs=None,
+                show_progress="hidden",
+            )
+            
     def _handle_tab_selection(self, state: dict, evt: gr.SelectData):
         if not hasattr(self, 'previous_tab_id'):
             self.previous_tab_id = "video_gen"
@@ -453,3 +465,7 @@ class WAN2GPApplication:
                 traceback.print_exc()
 
         self.previous_tab_id = new_tab_id
+        
+    def run_component_insertion(self, components_dict: Dict[str, Any]):
+        if hasattr(self, 'plugin_manager'):
+            self.plugin_manager.run_component_insertion_and_setup(components_dict)

@@ -9404,8 +9404,7 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
         gen_inputs = [state_dict if k=="state" else locals_dict[k]  for k in inputs_names] + [state_dict, plugin_data] + extra_inputs
         return gen_inputs
     else:
-        if hasattr(app, 'plugin_manager'):
-            app.run_component_insertion(locals_dict)
+        app.run_component_insertion(locals_dict)
         return locals_dict
 
 
@@ -10205,10 +10204,7 @@ def create_ui():
     js += """
     }
     """
-    if hasattr(app, 'plugin_manager'):
-        enabled_plugins = server_config.get("enabled_plugins", [])
-        app.plugin_manager.load_plugins_from_directory(enabled_plugins)
-        app.plugin_manager.inject_globals(globals())
+    app.initialize_plugins(globals())
     if server_config.get("display_stats", 0) == 1:
         from shared.utils.stats import SystemStatsApp
         stats_app = SystemStatsApp() 
@@ -10336,15 +10332,7 @@ def create_ui():
                 outputs=[generator_tab_components['queue_html'], main_tabs, edit_tab],
                 show_progress="hidden"
             )
-            if hasattr(app, 'plugin_manager'):
-                app._create_plugin_tabs(enabled_plugins)
-                if main_tabs and state:
-                    main_tabs.select(
-                        fn=app._handle_tab_selection,
-                        inputs=[state],
-                        outputs=None,
-                        show_progress="hidden",
-                    )
+            app.setup_ui_tabs(main_tabs, state)
         if stats_app is not None:
             stats_app.setup_events(main, state)
         return main
