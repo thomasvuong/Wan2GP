@@ -11,6 +11,46 @@ import subprocess
 import git
 import shutil
 import stat
+import json
+
+def auto_install_and_enable_default_plugins(manager: 'PluginManager', wgp_globals: dict):
+    server_config = wgp_globals.get("server_config")
+    server_config_filename = wgp_globals.get("server_config_filename")
+
+    if not server_config or not server_config_filename:
+        print("[Plugins] WARNING: Cannot auto-install/enable default plugins. Server config not found.")
+        return
+
+    default_plugins = {
+        "wan2gp-gallery": "https://github.com/Tophness/wan2gp-gallery.git",
+        "wan2gp-lora-multipliers-ui": "https://github.com/Tophness/wan2gp-lora-multipliers-ui.git"
+    }
+    
+    config_modified = False
+    enabled_plugins = server_config.get("enabled_plugins", [])
+
+    for repo_name, url in default_plugins.items():
+        target_dir = os.path.join(manager.plugins_dir, repo_name)
+        if not os.path.isdir(target_dir):
+            print(f"[Plugins] Auto-installing default plugin: {repo_name}...")
+            result = manager.install_plugin_from_url(url)
+            print(f"[Plugins] Install result for {repo_name}: {result}")
+            
+            if "[Success]" in result:
+                if repo_name not in enabled_plugins:
+                    enabled_plugins.append(repo_name)
+                    config_modified = True
+    
+    if config_modified:
+        print("[Plugins] Enabling newly installed default plugins for this session...")
+        server_config["enabled_plugins"] = enabled_plugins
+        try:
+            with open(server_config_filename, 'w', encoding='utf-8') as f:
+                json.dump(server_config, f, indent=4)
+            print("[Plugins] Config file updated with newly enabled plugins.")
+        except Exception as e:
+            print(f"[Plugins] ERROR: Failed to update config file '{server_config_filename}': {e}")
+
 
 SYSTEM_PLUGINS = [
     "wan2gp-about",
@@ -426,6 +466,8 @@ class WAN2GPApplication:
     def initialize_plugins(self, wgp_globals: dict):
         if not hasattr(self, 'plugin_manager'):
             return
+        
+        auto_install_and_enable_default_plugins(self.plugin_manager, wgp_globals)
         
         server_config = wgp_globals.get("server_config")
         if not server_config:
