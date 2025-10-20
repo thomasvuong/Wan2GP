@@ -170,10 +170,10 @@ def format_time(seconds):
         return f"{seconds:.1f}s"
 
 def get_pastel_color(index):
-    hue = (index * 137) % 360
-    saturation = 75
-    lightness = 92
-    return f"hsl({hue}, {saturation}%, {lightness}%)"
+    hue = (index * 137.508 + 22241) % 360
+    saturation = 70 + (index * 47) % 11
+    lightness = 90 + (index * 23) % 5
+    return f"hsl({hue:.0f}, {saturation}%, {lightness}%)"
 
 def get_alternating_grey_color(index):
     if index % 2 == 0:
