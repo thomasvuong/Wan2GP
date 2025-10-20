@@ -9114,8 +9114,8 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
 
             gr.on( triggers=[video_info_extract_audio_settings_btn.click, video_info_extract_image_settings_btn.click], fn=validate_wizard_prompt,
                 inputs= [state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] ,
-                outputs= [prompt],
                 show_progress="hidden",
+                outputs= [prompt],
             ).then(fn=save_inputs,
                 inputs =[target_state] + gen_inputs,
                 outputs= None
@@ -9139,10 +9139,6 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 inputs =[target_state] + gen_inputs,
                 outputs= None
             )
-
-            main_tabs.select(fn=detect_auto_save_form, inputs= [state], outputs= save_form_trigger, trigger_mode="multiple")
-
-
             
             gr.on(triggers=[video_info_eject_video_btn.click, video_info_eject_video2_btn.click, video_info_eject_video3_btn.click, video_info_eject_image_btn.click], fn=eject_video_from_gallery, inputs =[state, output, last_choice], outputs = [output, video_info, video_buttons_row] )
             video_info_to_control_video_btn.click(fn=video_to_control_video, inputs =[state, output, last_choice], outputs = [video_guide] )            
@@ -9237,28 +9233,29 @@ def generate_video_tab(update_form = False, state_dict = None, ui_defaults = Non
                 show_progress="hidden",
             )                
 
-            model_family.input(fn=change_model_family, inputs=[state, model_family], outputs= [model_base_type_choice, model_choice], show_progress="hidden")
-            model_base_type_choice.input(fn=change_model_base_types, inputs=[state, model_family, model_base_type_choice], outputs= [model_base_type_choice, model_choice], show_progress="hidden")
-
-            model_choice.change(fn=validate_wizard_prompt,
-                inputs= [state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] ,
-                outputs= [prompt],
-                show_progress="hidden",
-            ).then(fn=save_inputs,
-                inputs =[target_state] + gen_inputs,
-                outputs= None
-            ).then(fn= change_model,
-                inputs=[state, model_choice],
-                outputs= [header]
-            ).then(fn= fill_inputs, 
-                inputs=[state],
-                outputs=gen_inputs + extra_inputs,
-                show_progress="full" if args.debug_gen_form else "hidden",
-            ).then(fn= preload_model_when_switching, 
-                inputs=[state],
-                outputs=[gen_status])
-            
             if tab_id == 'generate':
+                main_tabs.select(fn=detect_auto_save_form, inputs= [state], outputs= save_form_trigger, trigger_mode="multiple")
+                model_family.input(fn=change_model_family, inputs=[state, model_family], outputs= [model_base_type_choice, model_choice], show_progress="hidden")
+                model_base_type_choice.input(fn=change_model_base_types, inputs=[state, model_family, model_base_type_choice], outputs= [model_base_type_choice, model_choice], show_progress="hidden")
+
+                model_choice.change(fn=validate_wizard_prompt,
+                    inputs= [state, wizard_prompt_activated_var, wizard_variables_var,  prompt, wizard_prompt, *prompt_vars] ,
+                    outputs= [prompt],
+                    show_progress="hidden",
+                ).then(fn=save_inputs,
+                    inputs =[target_state] + gen_inputs,
+                    outputs= None
+                ).then(fn= change_model,
+                    inputs=[state, model_choice],
+                    outputs= [header]
+                ).then(fn= fill_inputs, 
+                    inputs=[state],
+                    outputs=gen_inputs + extra_inputs,
+                    show_progress="full" if args.debug_gen_form else "hidden",
+                ).then(fn= preload_model_when_switching, 
+                    inputs=[state],
+                    outputs=[gen_status])
+            
                 generate_btn.click(fn = init_generate, inputs = [state, output, last_choice, audio_files_paths, audio_file_selected], outputs=[generate_trigger, mode])
                 add_to_queue_btn.click(fn = lambda : (get_unique_id(), ""), inputs = None, outputs=[add_to_queue_trigger, mode])
                 # gr.on(triggers=[add_to_queue_btn.click, add_to_queue_trigger.change],fn=validate_wizard_prompt, 

@@ -27,7 +27,7 @@ class family_handler():
             extra_model_def["image_ref_choices"] = {
             "choices": [
                 ("None", ""),
-                ("Conditional Images is first Main Subject / Landscape and may be followed by People / Objects", "KI"),
+                ("Conditional Image is first Main Subject / Landscape and may be followed by People / Objects", "KI"),
                 ("Conditional Images are People / Objects", "I"),
                 ],
             "letters_filter": "KI",
