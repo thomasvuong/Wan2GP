@@ -90,6 +90,20 @@ unique_id_lock = threading.Lock()
 offloadobj = enhancer_offloadobj = wan_model = None
 reload_needed = True
 
+def set_wgp_global(variable_name: str, new_value: any) -> str:
+    if variable_name not in globals():
+        error_msg = f"Plugin tried to modify a non-existent global: '{variable_name}'."
+        print(f"ERROR: {error_msg}")
+        gr.Warning(error_msg)
+        return f"Error: Global variable '{variable_name}' does not exist."
+
+    try:
+        globals()[variable_name] = new_value
+    except Exception as e:
+        error_msg = f"Error while setting global '{variable_name}': {e}"
+        print(f"ERROR: {error_msg}")
+        return error_msg
+
 def clear_gen_cache():
     if "_cache" in offload.shared_state:
         del offload.shared_state["_cache"]

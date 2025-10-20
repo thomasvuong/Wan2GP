@@ -34,8 +34,17 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.request_global("get_sorted_dropdown")
         self.request_global("app")
         self.request_global("fl")
-        self.request_global("is_generation_in_progress")        
+        self.request_global("is_generation_in_progress")
+        self.request_global("generate_header")
+        self.request_global("generate_dropdown_model_list")
+        self.request_global("get_unique_id")
+        self.request_global("enhancer_offloadobj")
 
+        self.request_component("header")
+        self.request_component("model_family")
+        self.request_component("model_base_type_choice")
+        self.request_component("model_choice")
+        self.request_component("refresh_form_trigger")      
         self.request_component("state")
         self.request_component("resolution")
 
@@ -47,7 +56,6 @@ class ConfigTabPlugin(WAN2GPPlugin):
         )
 
     def create_config_ui(self):
-        gr.Markdown("Please click 'Save' or 'Save and Restart' for changes to take effect. Some choices may be locked if set via command-line arguments.")
         with gr.Column():
             with gr.Tabs():
                 with gr.Tab("General"):
@@ -174,7 +182,6 @@ class ConfigTabPlugin(WAN2GPPlugin):
             self.msg = gr.Markdown()
             with gr.Row():
                 self.apply_btn = gr.Button("Save Settings")
-                self.apply_and_restart_btn = gr.Button("Save and Restart", variant="primary")
 
         inputs = [
             self.state,
@@ -197,13 +204,14 @@ class ConfigTabPlugin(WAN2GPPlugin):
         self.apply_btn.click(
             fn=self._save_changes,
             inputs=inputs,
-            outputs=[self.msg]
-        )
-        
-        self.apply_and_restart_btn.click(
-            fn=self._save_and_restart,
-            inputs=inputs,
-            outputs=None
+            outputs=[
+                self.msg,
+                self.header,
+                self.model_family,
+                self.model_base_type_choice,
+                self.model_choice,
+                self.refresh_form_trigger
+            ]
         )
 
         def release_ram_and_notify():
@@ -215,11 +223,13 @@ class ConfigTabPlugin(WAN2GPPlugin):
 
     def _save_changes(self, state, *args):
         if self.is_generation_in_progress():
-            return "<div style='color:red; text-align:center;'>Unable to change config when a generation is in progress.</div>"
+            return "<div style='color:red; text-align:center;'>Unable to change config when a generation is in progress.</div>", *[gr.update()]*5
 
         if self.args.lock_config:
-            return "<div style='color:red; text-align:center;'>Configuration is locked by command-line arguments.</div>"
-        
+            return "<div style='color:red; text-align:center;'>Configuration is locked by command-line arguments.</div>", *[gr.update()]*5
+
+        old_server_config = self.server_config.copy()
+
         (
             transformer_types_choices, model_hierarchy_type_choice, fit_canvas_choice,
             attention_choice, preload_model_policy_choice, clear_file_list_choice,
@@ -240,8 +250,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
         if len(checkpoints_paths_choice.strip()) == 0:
             checkpoints_paths = self.fl.default_checkpoints_paths
         else:
-            checkpoints_paths = checkpoints_paths_choice.replace("\r", "").split("\n")
-            checkpoints_paths = [path.strip() for path in checkpoints_paths if len(path.strip()) > 0]
+            checkpoints_paths = [path.strip() for path in checkpoints_paths_choice.replace("\r", "").split("\n") if len(path.strip()) > 0]
 
         self.fl.set_checkpoints_paths(checkpoints_paths)
 
@@ -266,6 +275,7 @@ class ConfigTabPlugin(WAN2GPPlugin):
             "checkpoints_paths": checkpoints_paths,
             "queue_color_scheme": queue_color_scheme_choice,
             "embed_source_images": embed_source_images_choice,
+            "video_container": "mp4", # Fixed to MP4
             "last_model_type": state["model_type"],
             "last_model_per_family": state["last_model_per_family"],
             "last_model_per_type": state["last_model_per_type"],
@@ -277,20 +287,60 @@ class ConfigTabPlugin(WAN2GPPlugin):
             new_server_config["enabled_plugins"] = self.server_config["enabled_plugins"]
 
         if self.args.lock_config:
-            if "attention_mode" in self.server_config: new_server_config["attention_mode"] = self.server_config["attention_mode"]
-            if "compile" in self.server_config: new_server_config["compile"] = self.server_config["compile"]
+            if "attention_mode" in old_server_config: new_server_config["attention_mode"] = old_server_config["attention_mode"]
+            if "compile" in old_server_config: new_server_config["compile"] = old_server_config["compile"]
 
         with open(self.server_config_filename, "w", encoding="utf-8") as writer:
             writer.write(json.dumps(new_server_config, indent=4))
         
-        self.server_config.update(new_server_config)
+        changes = [k for k, v in new_server_config.items() if v != old_server_config.get(k)]
 
-        return "<div style='color:green; text-align:center;'>Settings saved. Please restart the application for all changes to take effect.</div>"
+        no_reload_keys = [
+            "attention_mode", "vae_config", "boost", "save_path", "image_save_path",
+            "metadata_type", "clear_file_list", "fit_canvas", "depth_anything_v2_variant",
+            "notification_sound_enabled", "notification_sound_volume", "mmaudio_enabled",
+            "max_frames_multiplier", "display_stats", "video_output_codec", "video_container",
+            "embed_source_images", "image_output_codec", "audio_output_codec", "checkpoints_paths",
+            "model_hierarchy_type", "UI_theme", "queue_color_scheme"
+        ]
 
-    def _save_and_restart(self, *args):
-        save_message = self._save_changes(*args)
-        if "Settings saved" in save_message:
-            gr.Info("Settings saved. Restarting application...")
-            self.quit_application()
-        else:
-            gr.Warning("Could not save settings. Restart aborted.")
+        needs_reload = not all(change in no_reload_keys for change in changes)
+
+        self.set_global("server_config", new_server_config)
+        self.set_global("three_levels_hierarchy", new_server_config["model_hierarchy_type"] == 1)
+        self.set_global("attention_mode", new_server_config["attention_mode"])
+        self.set_global("default_profile", new_server_config["profile"])
+        self.set_global("compile", new_server_config["compile"])
+        self.set_global("text_encoder_quantization", new_server_config["text_encoder_quantization"])
+        self.set_global("vae_config", new_server_config["vae_config"])
+        self.set_global("boost", new_server_config["boost"])
+        self.set_global("save_path", new_server_config["save_path"])
+        self.set_global("image_save_path", new_server_config["image_save_path"])
+        self.set_global("preload_model_policy", new_server_config["preload_model_policy"])
+        self.set_global("transformer_quantization", new_server_config["transformer_quantization"])
+        self.set_global("transformer_dtype_policy", new_server_config["transformer_dtype_policy"])
+        self.set_global("transformer_types", new_server_config["transformer_types"])
+        self.set_global("reload_needed", needs_reload)
+
+        if "enhancer_enabled" in changes or "enhancer_mode" in changes:
+            self.set_global("prompt_enhancer_image_caption_model", None)
+            self.set_global("prompt_enhancer_image_caption_processor", None)
+            self.set_global("prompt_enhancer_llm_model", None)
+            self.set_global("prompt_enhancer_llm_tokenizer", None)
+            if self.enhancer_offloadobj:
+                self.enhancer_offloadobj.release()
+                self.set_global("enhancer_offloadobj", None)
+
+        model_type = state["model_type"]
+        
+        model_family_update, model_base_type_update, model_choice_update = self.generate_dropdown_model_list(model_type)
+        header_update = self.generate_header(model_type, compile=new_server_config["compile"], attention_mode=new_server_config["attention_mode"])
+        
+        return (
+            "<div style='color:green; text-align:center;'>The new configuration has been succesfully applied.</div>",
+            header_update,
+            model_family_update,
+            model_base_type_update,
+            model_choice_update,
+            self.get_unique_id()
+        )

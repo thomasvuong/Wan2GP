@@ -46,6 +46,7 @@ class WAN2GPPlugin:
         self._setup_complete = False
         self._data_hooks: Dict[str, List[callable]] = {}
         self.tab_ids: List[str] = []
+        self._set_wgp_global_func = None
         
     def setup_ui(self) -> None:
         pass
@@ -69,7 +70,11 @@ class WAN2GPPlugin:
     def request_global(self, global_name: str) -> None:
         if global_name not in self._global_requests:
             self._global_requests.append(global_name)
-            
+
+    def set_global(self, variable_name: str, new_value: Any):
+        if self._set_wgp_global_func:
+            return self._set_wgp_global_func(variable_name, new_value)
+
     @property
     def component_requests(self) -> List[str]:
         return self._component_requests.copy()
@@ -285,6 +290,8 @@ class PluginManager:
     def inject_globals(self, global_references: Dict[str, Any]) -> None:
         for plugin_id, plugin in self.plugins.items():
             try:
+                if 'set_wgp_global' in global_references:
+                    plugin._set_wgp_global_func = global_references['set_wgp_global']
                 for global_name in plugin.global_requests:
                     if global_name in global_references:
                         setattr(plugin, global_name, global_references[global_name])
