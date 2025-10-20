@@ -365,7 +365,7 @@ class GalleryPlugin(WAN2GPPlugin):
         return configs
 
     def get_video_info_html(self, current_state, file_path):
-        configs, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
+        configs, _, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
         values, labels = [os.path.basename(file_path)], ["File Name"]
         misc_values, misc_labels, pp_values, pp_labels = [], [], [], []
         is_image = self.has_image_file_extension(file_path)
@@ -414,7 +414,7 @@ class GalleryPlugin(WAN2GPPlugin):
         if len(file_paths) == 1:
             file_path = file_paths[0]
             updates[self.path_for_settings_loader] = file_path
-            configs, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
+            configs, _, _ = self.get_settings_from_file(current_state, file_path, False, False, False)
             updates[self.send_to_generator_settings_btn] = gr.Button(visible=True, interactive=bool(configs))
             updates[self.metadata_panel_output] = gr.HTML(value=self.get_video_info_html(current_state, file_path), visible=True)
 
@@ -431,8 +431,8 @@ class GalleryPlugin(WAN2GPPlugin):
                     updates[self.merge_info_display] = gr.Column(visible=True)
                     f1_num, f2_num = merge_info['source_video_1']['frame_used'], merge_info['source_video_2']['frame_used']
                     f1_pil, f2_pil = self.get_video_frame(vid1_abs, f1_num - 1, return_PIL=True), self.get_video_frame(vid2_abs, f2_num - 1, return_PIL=True)
-                    c1, _ = self.get_settings_from_file(current_state, vid1_abs, False, False, False)
-                    c2, _ = self.get_settings_from_file(current_state, vid2_abs, False, False, False)
+                    c1, _, _ = self.get_settings_from_file(current_state, vid1_abs, False, False, False)
+                    c2, _, _ = self.get_settings_from_file(current_state, vid2_abs, False, False, False)
                     p1, p2 = (c1.get('prompt', 'N/A') if c1 else 'N/A'), (c2.get('prompt', 'N/A') if c2 else 'N/A')
                     
                     updates[self.merge_source1_prompt] = f"<b>{vid1_rel} (Frame {f1_num})</b><br>{p1[:100] + '...' if len(p1) > 100 else p1}"
@@ -459,7 +459,7 @@ class GalleryPlugin(WAN2GPPlugin):
 
     def load_settings_and_frames_from_gallery(self, current_state, file_path):
         if not file_path: gr.Warning("No file selected."); return gr.update(), gr.update(), gr.update(), gr.update()
-        configs, _ = self.get_settings_from_file(current_state, file_path, True, True, True)
+        configs, _, _ = self.get_settings_from_file(current_state, file_path, True, True, True)
         if not configs: gr.Info("No settings found."); return gr.update(), gr.update(), gr.update(), gr.update()
         current_model_type = current_state["model_type"]
         target_model_type = configs.get("model_type", current_model_type)
@@ -492,7 +492,7 @@ class GalleryPlugin(WAN2GPPlugin):
     
     def recreate_join_interface(self, file_info, current_state):
         if isinstance(file_info, str): # Called from single merged video
-            configs, _ = self.get_settings_from_file(current_state, file_info, False, False, False)
+            configs, _, _ = self.get_settings_from_file(current_state, file_info, False, False, False)
             if not (configs and "merge_info" in configs):
                 gr.Warning("Could not find merge info in the selected file.")
                 return {}
