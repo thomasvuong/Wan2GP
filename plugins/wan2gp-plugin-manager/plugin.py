@@ -12,7 +12,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
     def __init__(self):
         super().__init__()
         self.name = "Plugin Manager UI"
-        self.version = "1.5.0"
+        self.version = "1.8.0"
         self.description = "A built-in UI for managing, installing, and updating Wan2GP plugins"
 
     def setup_ui(self):
@@ -20,6 +20,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         self.request_global("server_config")
         self.request_global("server_config_filename")
         self.request_component("main")
+        self.request_component("main_tabs")
         
         self.add_tab(
             tab_id="plugin_manager_tab",
@@ -29,6 +30,7 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         )
 
     def _get_js_script_html(self):
+        # ... (JavaScript code remains unchanged) ...
         js_code = """
             () => {
                 function updateGradioInput(elem_id, value) {
@@ -123,9 +125,17 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
 
     def _build_community_plugins_html(self):
         try:
+            installed_plugin_ids = {p['id'] for p in self.app.plugin_manager.get_plugins_info()}
+            
             response = requests.get(COMMUNITY_PLUGINS_URL, timeout=10)
             response.raise_for_status()
             plugins = response.json()
+
+            community_plugins = [
+                p for p in plugins 
+                if p.get('url', '').split('/')[-1].replace('.git', '') not in installed_plugin_ids
+            ]
+
         except requests.exceptions.RequestException as e:
             gr.Warning(f"Could not fetch community plugins list: {e}")
             return "<p style='text-align:center; color: var(--color-accent-soft);'>Failed to load community plugins.</p>"
@@ -133,11 +143,14 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
             gr.Warning("Failed to parse the community plugins list. The file may be malformed.")
             return "<p style='text-align:center; color: var(--color-accent-soft);'>Error reading community plugins list.</p>"
 
+        if not community_plugins:
+            return "<p style='text-align:center; color: var(--text-color-secondary);'>All available community plugins are already installed.</p>"
+
         items_html = ""
-        for plugin in plugins:
+        for plugin in community_plugins:
             name = plugin.get('name')
             author = plugin.get('author')
-            version = plugin.get('version', 'N/A') # <-- Get version
+            version = plugin.get('version', 'N/A')
             description = plugin.get('description')
             url = plugin.get('url')
 
@@ -168,40 +181,6 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         enabled_user_plugins = self.server_config.get("enabled_plugins", [])
         all_user_plugins_info = [p for p in plugins_info if not p.get('system')]
         
-        if not all_user_plugins_info:
-            return "<p style='text-align:center; color: var(--text-color-secondary);'>No user-installed plugins found.</p>"
-
-        user_plugins_map = {p['id']: p for p in all_user_plugins_info}
-        user_plugins = []
-        for plugin_id in enabled_user_plugins:
-            if plugin_id in user_plugins_map:
-                user_plugins.append(user_plugins_map.pop(plugin_id))
-        user_plugins.extend(user_plugins_map.values())
-
-        user_items_html = ""
-        for plugin in user_plugins:
-            plugin_id = plugin['id']
-            checked = "checked" if plugin_id in enabled_user_plugins else ""
-            user_items_html += f"""
-            <div class="plugin-item" data-plugin-id="{plugin_id}" draggable="true">
-                <div class="plugin-info-container">
-                    <input type="checkbox" class="plugin-enable-checkbox" {checked}>
-                    <div class="plugin-item-info">
-                        <div class="plugin-header">
-                            <span class="name">{plugin['name']}</span>
-                            <span class="version">version {plugin['version']} (id: {plugin['id']})</span>
-                        </div>
-                        <span class="description">{plugin.get('description', 'No description provided.')}</span>
-                    </div>
-                </div>
-                <div class="plugin-item-actions">
-                    <button class="plugin-action-btn" onclick="handlePluginAction(this, 'update')">Update</button>
-                    <button class="plugin-action-btn" onclick="handlePluginAction(this, 'reinstall')">Reinstall</button>
-                    <button class="plugin-action-btn" onclick="handlePluginAction(this, 'uninstall')">Uninstall</button>
-                </div>
-            </div>
-            """
-
         css = """
         <style>
             .plugin-list { display: flex; flex-direction: column; gap: 12px; }
@@ -226,55 +205,78 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         </style>
         """
 
-        full_html = f"""
-        {css}
-        <div class="plugin-list">
-            <div id="user-plugin-list">{user_items_html}</div>
-        </div>
-        """
-        return full_html
+        if not all_user_plugins_info:
+            user_html = "<p style='text-align:center; color: var(--text-color-secondary);'>No user-installed plugins found.</p>"
+        else:
+            user_plugins_map = {p['id']: p for p in all_user_plugins_info}
+            user_plugins = []
+            for plugin_id in enabled_user_plugins:
+                if plugin_id in user_plugins_map:
+                    user_plugins.append(user_plugins_map.pop(plugin_id))
+            user_plugins.extend(sorted(user_plugins_map.values(), key=lambda p: p['name']))
+
+            user_items_html = ""
+            for plugin in user_plugins:
+                plugin_id = plugin['id']
+                checked = "checked" if plugin_id in enabled_user_plugins else ""
+                user_items_html += f"""
+                <div class="plugin-item" data-plugin-id="{plugin_id}" draggable="true">
+                    <div class="plugin-info-container">
+                        <input type="checkbox" class="plugin-enable-checkbox" {checked}>
+                        <div class="plugin-item-info">
+                            <div class="plugin-header">
+                                <span class="name">{plugin['name']}</span>
+                                <span class="version">version {plugin['version']} (id: {plugin['id']})</span>
+                            </div>
+                            <span class="description">{plugin.get('description', 'No description provided.')}</span>
+                        </div>
+                    </div>
+                    <div class="plugin-item-actions">
+                        <button class="plugin-action-btn" onclick="handlePluginAction(this, 'update')">Update</button>
+                        <button class="plugin-action-btn" onclick="handlePluginAction(this, 'reinstall')">Reinstall</button>
+                        <button class="plugin-action-btn" onclick="handlePluginAction(this, 'uninstall')">Uninstall</button>
+                    </div>
+                </div>
+                """
+            user_html = f'<div id="user-plugin-list">{user_items_html}</div>'
+
+        return f"{css}<div class='plugin-list'>{user_html}</div>"
 
     def create_plugin_manager_ui(self):
         with gr.Blocks() as plugin_blocks:
             with gr.Row(equal_height=False, variant='panel'):
                 with gr.Column(scale=2, min_width=600):
                     gr.Markdown("### Installed Plugins (Drag to reorder tabs)")
-                    self.plugins_html_display = gr.HTML(self._build_plugins_html)
+                    self.plugins_html_display = gr.HTML()
                     with gr.Row(elem_classes="save-buttons-container"):
                         self.save_plugins_button = gr.Button("Save", variant="secondary", size="sm", scale=0, elem_classes="stylish-save-btn")
                         self.save_and_restart_button = gr.Button("Save and Restart", variant="primary", size="sm", scale=0, elem_classes="stylish-save-btn")
                 with gr.Column(scale=2, min_width=300):
                     gr.Markdown("### Discover & Install")
                     
-                    with gr.Column(visible=True) as self.manual_install_view:
-                        gr.Markdown("Enter the URL of a GitHub repository containing a Wan2GP plugin.")
+                    self.community_plugins_html = gr.HTML()
+                    
+                    with gr.Accordion("Install from URL", open=True):
                         with gr.Group():
                             self.plugin_url_textbox = gr.Textbox(label="GitHub URL", placeholder="https://github.com/user/wan2gp-plugin-repo")
                             self.install_plugin_button = gr.Button("Download and Install from URL")
-                        self.browse_community_button = gr.Button("Browse Community Plugins", variant="secondary")
-                    
-                    with gr.Column(visible=False) as self.community_browser_view:
-                        gr.Markdown("A list of community-contributed plugins. Click install to add them.")
-                        self.community_plugins_html = gr.HTML()
-                        self.back_to_manual_button = gr.Button("‹ Back to Manual Install")
 
             with gr.Column(visible=False):
                 self.plugin_action_input = gr.Textbox(elem_id="plugin_action_input")
                 self.save_action_input = gr.Textbox(elem_id="save_action_input")
 
-        js=self._get_js_script_html()
-        self.main.load(
-            fn=self._refresh_ui,
-            inputs=[],
-            outputs=[self.plugins_html_display],
-            js=js
+        js = self._get_js_script_html()
+        plugin_blocks.load(fn=None, js=js)
+
+        self.main_tabs.select(
+            self._on_tab_select_refresh,
+            None,
+            [self.plugins_html_display, self.community_plugins_html],
+            show_progress="hidden"
         )
-        self.save_plugins_button.click(
-            fn=None, js="handleSave(false)"
-        )
-        self.save_and_restart_button.click(
-            fn=None, js="handleSave(true)"
-        )
+        
+        self.save_plugins_button.click(fn=None, js="handleSave(false)")
+        self.save_and_restart_button.click(fn=None, js="handleSave(true)")
 
         self.save_action_input.change(
             fn=self._handle_save_action,
@@ -285,39 +287,46 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         self.plugin_action_input.change(
             fn=self._handle_plugin_action_from_json,
             inputs=[self.plugin_action_input],
-            outputs=[self.plugins_html_display]
+            outputs=[self.plugins_html_display, self.community_plugins_html],
+            show_progress="full"
         )
 
         self.install_plugin_button.click(
             fn=self._install_plugin_and_refresh,
             inputs=[self.plugin_url_textbox],
-            outputs=[self.plugins_html_display, self.plugin_url_textbox]
-        )
-
-        self.browse_community_button.click(
-            fn=self._browse_community_plugins,
-            outputs=[self.community_plugins_html, self.manual_install_view, self.community_browser_view]
-        )
-        self.back_to_manual_button.click(
-            fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
-            outputs=[self.manual_install_view, self.community_browser_view]
+            outputs=[self.plugins_html_display, self.community_plugins_html, self.plugin_url_textbox],
+            show_progress="full"
         )
 
         return plugin_blocks
 
-    def _browse_community_plugins(self):
-        html = self._build_community_plugins_html()
-        return html, gr.update(visible=False), gr.update(visible=True)
-    
-    def _refresh_ui(self):
-        return gr.update(value=self._build_plugins_html())
+    def _on_tab_select_refresh(self, evt: gr.SelectData):
+        if evt.value != "Plugins":
+            return gr.update(), gr.update()
+        installed_html = self._build_plugins_html()
+        community_html = self._build_community_plugins_html()
+        return gr.update(value=installed_html), gr.update(value=community_html)
+
+    def _enable_plugin_after_install(self, url: str):
+        try:
+            plugin_id = url.split('/')[-1].replace('.git', '')
+            enabled_plugins = self.server_config.get("enabled_plugins", [])
+            if plugin_id not in enabled_plugins:
+                enabled_plugins.append(plugin_id)
+                self.server_config["enabled_plugins"] = enabled_plugins
+                with open(self.server_config_filename, "w", encoding="utf-8") as writer:
+                    writer.write(json.dumps(self.server_config, indent=4))
+                return True
+        except Exception as e:
+            gr.Warning(f"Failed to auto-enable plugin {plugin_id}: {e}")
+        return False
 
     def _save_plugin_settings(self, enabled_plugins: list):
         self.server_config["enabled_plugins"] = enabled_plugins
         with open(self.server_config_filename, "w", encoding="utf-8") as writer:
             writer.write(json.dumps(self.server_config, indent=4))
         gr.Info("Plugin settings saved. Please restart WanGP for changes to take effect.")
-        return self._refresh_ui()
+        return gr.update(value=self._build_plugins_html())
 
     def _save_and_restart(self, enabled_plugins: list):
         self.server_config["enabled_plugins"] = enabled_plugins
@@ -328,31 +337,34 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
 
     def _handle_save_action(self, payload_str: str):
         if not payload_str:
-            return self._refresh_ui()
+            return gr.update(value=self._build_plugins_html())
         try:
             payload = json.loads(payload_str)
             enabled_plugins = payload.get("enabled_plugins", [])
             if payload.get("restart", False):
                 self._save_and_restart(enabled_plugins)
-                return self._refresh_ui()
+                return gr.update(value=self._build_plugins_html())
             else:
                 return self._save_plugin_settings(enabled_plugins)
         except (json.JSONDecodeError, TypeError):
             gr.Warning("Could not process save action due to invalid data.")
-            return self._refresh_ui()
+            return gr.update(value=self._build_plugins_html())
 
     def _install_plugin_and_refresh(self, url, progress=gr.Progress()):
         progress(0, desc="Starting installation...")
-        result_message = self.app.plugin_manager.install_plugin_from_url(url)
+        result_message = self.app.plugin_manager.install_plugin_from_url(url, progress=progress)
         if "[Success]" in result_message:
+            was_enabled = self._enable_plugin_after_install(url)
+            if was_enabled:
+                result_message = result_message.replace("Please enable it", "It has been auto-enabled")
             gr.Info(result_message)
         else:
             gr.Warning(result_message)
-        return self._refresh_ui(), ""
+        return self._build_plugins_html(), self._build_community_plugins_html(), ""
 
-    def _handle_plugin_action_from_json(self, payload_str: str):
+    def _handle_plugin_action_from_json(self, payload_str: str, progress=gr.Progress()):
         if not payload_str:
-            return self._refresh_ui()
+            return gr.update(), gr.update()
         try:
             payload = json.loads(payload_str)
             action = payload.get("action")
@@ -362,7 +374,11 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                 url = payload.get("url")
                 if not url:
                     raise ValueError("URL is required for install_from_store action.")
-                result_message = self.app.plugin_manager.install_plugin_from_url(url)
+                result_message = self.app.plugin_manager.install_plugin_from_url(url, progress=progress)
+                if "[Success]" in result_message:
+                    was_enabled = self._enable_plugin_after_install(url)
+                    if was_enabled:
+                         result_message = result_message.replace("Please enable it", "It has been auto-enabled")
             else:
                 if not action or not plugin_id:
                      raise ValueError("Action and plugin_id are required.")
@@ -376,9 +392,9 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
                         with open(self.server_config_filename, "w", encoding="utf-8") as writer:
                             writer.write(json.dumps(self.server_config, indent=4))
                 elif action == 'update':
-                    result_message = self.app.plugin_manager.update_plugin(plugin_id)
+                    result_message = self.app.plugin_manager.update_plugin(plugin_id, progress=progress)
                 elif action == 'reinstall':
-                    result_message = self.app.plugin_manager.reinstall_plugin(plugin_id)
+                    result_message = self.app.plugin_manager.reinstall_plugin(plugin_id, progress=progress)
             
             if "[Success]" in result_message:
                 gr.Info(result_message)
@@ -389,4 +405,5 @@ class PluginManagerUIPlugin(WAN2GPPlugin):
         except (json.JSONDecodeError, ValueError) as e:
             gr.Warning(f"Could not perform plugin action: {e}")
             traceback.print_exc()
-        return self._refresh_ui()
+
+        return self._build_plugins_html(), self._build_community_plugins_html()

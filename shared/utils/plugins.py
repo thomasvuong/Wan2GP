@@ -10,6 +10,7 @@ import traceback
 import subprocess
 import git
 import shutil
+import stat
 
 SYSTEM_PLUGINS = [
     "wan2gp-about",
@@ -129,6 +130,13 @@ class PluginManager:
         plugins_info.sort(key=lambda p: (not p['system'], p['name']))
         return plugins_info
 
+    def _remove_readonly(self, func, path, exc_info):
+        if not os.access(path, os.W_OK):
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        else:
+            raise
+
     def uninstall_plugin(self, plugin_id: str):
         if not plugin_id:
             return "[Error] No plugin selected for uninstallation."
@@ -141,12 +149,12 @@ class PluginManager:
             return f"[Error] Plugin '{plugin_id}' directory not found."
 
         try:
-            shutil.rmtree(target_dir)
+            shutil.rmtree(target_dir, onerror=self._remove_readonly)
             return f"[Success] Plugin '{plugin_id}' uninstalled. Please restart WanGP."
         except Exception as e:
             return f"[Error] Failed to remove plugin '{plugin_id}': {e}"
 
-    def update_plugin(self, plugin_id: str):
+    def update_plugin(self, plugin_id: str, progress=None):
         if not plugin_id:
             return "[Error] No plugin selected for update."
             
@@ -155,9 +163,11 @@ class PluginManager:
             return f"[Error] '{plugin_id}' is not a git repository and cannot be updated automatically."
 
         try:
-            gr.Info(f"Attempting to update '{plugin_id}'...")
+            if progress is not None: progress(0, desc=f"Updating '{plugin_id}'...")
             repo = git.Repo(target_dir)
             origin = repo.remotes.origin
+            
+            if progress is not None: progress(0.2, desc=f"Fetching updates for '{plugin_id}'...")
             origin.fetch()
             
             local_commit = repo.head.commit
@@ -166,20 +176,24 @@ class PluginManager:
             if local_commit == remote_commit:
                  return f"[Info] Plugin '{plugin_id}' is already up to date."
 
+            if progress is not None: progress(0.6, desc=f"Pulling updates for '{plugin_id}'...")
             origin.pull()
             
             requirements_path = os.path.join(target_dir, 'requirements.txt')
             if os.path.exists(requirements_path):
-                gr.Info(f"Re-installing dependencies for '{plugin_id}'...")
+                if progress is not None: progress(0.8, desc=f"Re-installing dependencies for '{plugin_id}'...")
                 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
 
+            if progress is not None: progress(1.0, desc="Update complete.")
             return f"[Success] Plugin '{plugin_id}' updated. Please restart WanGP for changes to take effect."
         except git.exc.GitCommandError as e:
+            traceback.print_exc()
             return f"[Error] Git update failed for '{plugin_id}': {e.stderr}"
         except Exception as e:
+            traceback.print_exc()
             return f"[Error] An unexpected error occurred during update of '{plugin_id}': {str(e)}"
 
-    def reinstall_plugin(self, plugin_id: str):
+    def reinstall_plugin(self, plugin_id: str, progress=None):
         if not plugin_id:
             return "[Error] No plugin selected for reinstallation."
 
@@ -193,23 +207,26 @@ class PluginManager:
                 repo = git.Repo(target_dir)
                 git_url = repo.remotes.origin.url
             except Exception as e:
+                traceback.print_exc()
                 return f"[Error] Could not get remote URL for '{plugin_id}': {e}"
         
         if not git_url:
             return f"[Error] Could not determine remote URL for '{plugin_id}'. Cannot reinstall."
 
-        gr.Info(f"Reinstalling '{plugin_id}'...")
+        if progress is not None: progress(0, desc=f"Reinstalling '{plugin_id}'...")
+
+        if progress is not None: progress(0.2, desc=f"Uninstalling '{plugin_id}'...")
         uninstall_msg = self.uninstall_plugin(plugin_id)
         if "[Error]" in uninstall_msg:
             return uninstall_msg
         
-        install_msg = self.install_plugin_from_url(git_url)
+        install_msg = self.install_plugin_from_url(git_url, progress=progress)
         if "[Success]" in install_msg:
             return f"[Success] Plugin '{plugin_id}' reinstalled. Please restart WanGP."
         else:
             return f"[Error] Reinstallation failed during install step: {install_msg}"
 
-    def install_plugin_from_url(self, git_url: str):
+    def install_plugin_from_url(self, git_url: str, progress=None):
         if not git_url or not git_url.startswith("https://github.com/"):
             return "[Error] Invalid GitHub URL."
 
@@ -220,35 +237,40 @@ class PluginManager:
             if os.path.exists(target_dir):
                 return f"[Warning] Plugin '{repo_name}' already exists. Please remove it manually to reinstall."
 
-            gr.Info(f"Cloning '{repo_name}' into '{target_dir}'...")
+            if progress is not None: progress(0.1, desc=f"Cloning '{repo_name}'...")
             git.Repo.clone_from(git_url, target_dir)
 
             requirements_path = os.path.join(target_dir, 'requirements.txt')
             if os.path.exists(requirements_path):
-                gr.Info(f"Installing dependencies for '{repo_name}'...")
+                if progress is not None: progress(0.5, desc=f"Installing dependencies for '{repo_name}'...")
                 try:
                     subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', requirements_path])
                 except subprocess.CalledProcessError as e:
+                    traceback.print_exc()
                     return f"[Error] Failed to install dependencies for {repo_name}. Check console for details. Error: {e}"
 
             setup_path = os.path.join(target_dir, 'setup.py')
             if os.path.exists(setup_path):
-                gr.Info(f"Running setup for '{repo_name}'...")
+                if progress is not None: progress(0.8, desc=f"Running setup for '{repo_name}'...")
                 try:
                     subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-e', target_dir])
                 except subprocess.CalledProcessError as e:
+                    traceback.print_exc()
                     return f"[Error] Failed to run setup.py for {repo_name}. Check console for details. Error: {e}"
             
             init_path = os.path.join(target_dir, '__init__.py')
             if not os.path.exists(init_path):
                 with open(init_path, 'w') as f:
                     pass
-
+            
+            if progress is not None: progress(1.0, desc="Installation complete.")
             return f"[Success] Plugin '{repo_name}' installed. Please enable it in the list and restart WanGP."
 
         except git.exc.GitCommandError as e:
+            traceback.print_exc()
             return f"[Error] Git clone failed: {e.stderr}"
         except Exception as e:
+            traceback.print_exc()
             return f"[Error] An unexpected error occurred: {str(e)}"
 
     def discover_plugins(self) -> List[str]:
