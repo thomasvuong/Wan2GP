@@ -6,7 +6,7 @@ import traceback
 from wgp import quit_application
 import requests
 
-COMMUNITY_PLUGINS_URL = "https://github.com/deepbeepmeep/Wan2GP/raw/refs/heads/v9/plugins.json"
+COMMUNITY_PLUGINS_URL = "https://github.com/deepbeepmeep/Wan2GP/raw/refs/heads/main/plugins.json"
 
 class PluginManagerUIPlugin(WAN2GPPlugin):
     def __init__(self):
