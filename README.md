@@ -25,9 +25,9 @@ WanGP supports the Wan (and derived models), Hunyuan Video and LTV Video models 
 
 What else will you ever need after this one ?
 
-With WanGP v9 you will have enough features to go on a desert island with no internet connection and comes back with a full Hollywood movie.
+With WanGP v9 you will have enough features to go to a desert island with no internet connection and comes back with a full Hollywood movie.
 
-First herer are the new models supported:
+First here are the new models supported:
 - **Wan 2.1 Alpha** : a very requested model that can generate videos with *semi transparent background* (as it is very lora picky it supports only the *Self Forcing / lightning* loras accelerators)
 - **Chatterbox Multilingual**: the first *Voice Generator* in WanGP. Let's say you have a flu and lost your voice (somehow I can't think of another usecase), the world will still be able to hear you as *Chatterbox* can generate up to 15s clips of your voice using a recorded voice sample. Chatterbox works with numerous languages out the box.
 - **Flux DreamOmni2** : another wannabe *Nano Banana* image Editor / image composer. The *Edit Mode* ("Conditional Image is first Main Subject ...") seems to work better than the *Gen Mode* (Conditional Images are People / Objects ..."). If you have at least 16 GB of VRAM it is recommended to force profile 3 for this model (it uses an autoregressive model for the prompt encoding and the start may be slow).
@@ -47,7 +47,7 @@ Huge Kudos & Thanks to **Tophness** that has outdone himself with these Great Fe
 - Added **Plugin support** to WanGP : found that features are missing in WanGP, you can now add tabs at the top in WanGP. Each tab may contain a full embedded App that can share data with the Video Generator of WanGP. Please check the Plugin guide written by Tophness and don't hesitate to contact him or me on the Discord if you have a plugin you want to share. I have added a new Plugins channels to discuss idea of plugins and help each other developing plugins. *Idea for a PlugIn that may end up popular*: a screen where you view the hard drive space used per model and that will let you remove unused models weights
 - Two Plugins ready to use designed & developped by **Tophness**: an **Extended Gallery** and a **Lora multipliers Wizard**
 
-WanGP v9 is now targetting Pytorch 2.8, don't forget to upgrade by doing:
+WanGP v9 is now targetting Pytorch 2.8 although it should still work with 2.7, don't forget to upgrade by doing:
 ```bash
 pip install torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128
 ```
