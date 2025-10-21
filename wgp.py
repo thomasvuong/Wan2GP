@@ -7,9 +7,13 @@ import torch._logging as tlog
 p = os.path.dirname(os.path.abspath(__file__))
 if p not in sys.path:
     sys.path.insert(0, p)
+import asyncio
+if os.name == "nt": asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import time
 import threading
 import argparse
+import warnings
+warnings.filterwarnings('ignore', message='Failed to find.*', module='triton')
 from mmgp import offload, safetensors2, profile_type 
 try:
     import triton
@@ -43,7 +47,6 @@ import gc
 import traceback
 import math 
 import typing
-import asyncio
 import inspect
 from shared.utils import prompt_parser
 import base64
@@ -70,7 +73,7 @@ from collections import defaultdict
 global_queue_ref = []
 AUTOSAVE_FILENAME = "queue.zip"
 PROMPT_VARS_MAX = 10
-target_mmgp_version = "3.6.5"
+target_mmgp_version = "3.6.6"
 WanGP_version = "9.0"
 settings_version = 2.39
 max_source_video_frames = 3000
@@ -3570,6 +3573,7 @@ def get_file_list(state, input_file_list, audio_files = False):
     return file_list, file_settings_list
 
 def set_file_choice(gen, file_list, choice, audio_files = False):
+    if len(file_list) > 0: choice = max(choice,0)
     gen["audio_last_selected" if audio_files else "last_selected"] = (choice + 1) >= len(file_list)
     gen["audio_selected" if audio_files else "selected"] = choice
 
@@ -10345,8 +10349,6 @@ if __name__ == "__main__":
     # threading.Thread(target=runner, daemon=True).start()
     os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
     server_port = int(args.server_port)
-    if os.name == "nt":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     if server_port == 0:
         server_port = int(os.getenv("SERVER_PORT", "7860"))
     server_name = args.server_name

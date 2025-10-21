@@ -38,7 +38,7 @@ Upgraded Features:
 - **Images Stored in Metadata**: Video Gen *Settings Metadata* that are stored in the Generated Videos can now contain the Start Image, Image Refs used to generate the Video. Many thanks to **Gunther-Schulz** for this contribution
 - **Three Levels of Hierarchy** to browse the models / finetunes: you can collect as many finetunes as you want now and they will no longer encumber the UI.
 - Added **Loras Accelerators** for *Wan 2.1 1.3B*, *Wan 2.2 i2v*, *Flux* and the latest *Wan 2.2 Lightning*
-- Finetunes now support **Custom Text Encoders** : please check the finetunes doc. Not all text encoders format are yet supported. I will add more soon. 
+- Finetunes now support **Custom Text Encoders** : you will need to use the "text_encoder_URLs" key. Please check the finetunes doc. 
 - Sometime Less is More: removed the palingenesis finetunes that were controversial
 
 Huge Kudos & Thanks to **Tophness** that has outdone himself with these Great Features:
