@@ -2960,30 +2960,23 @@ def download_models(model_filename = None, model_type= None, module_type = False
             if module_type: return
         model_filename = None
 
-        preload_URLs = get_model_recursive_prop(model_type, "preload_URLs", return_list= True)
+    for prop in ["preload_URLs", "loras", "text_encoder_URLs"]:
+        preload_URLs = get_model_recursive_prop(model_type, prop, return_list= True)
+        if prop in  ["text_encoder_URLs"]:
+            preload_URLs = [get_model_filename(model_type=model_type, quantization= text_encoder_quantization, dtype_policy = transformer_dtype_policy, URLs=preload_URLs)] if len(preload_URLs) > 0 else []
+
         for url in preload_URLs:
             filename = fl.locate_file(os.path.basename(url))
             if filename is None: 
                 filename = fl.get_download_location(os.path.basename(url))
                 if not url.startswith("http"):
-                    raise Exception(f"File '{filename}' to preload was not found locally and no URL was provided to download it. Please add an URL in the model definition file.")
+                    raise Exception(f"{prop}{filename}' was not found locally and no URL was provided to download it. Please add an URL in the model definition file.")
                 try:
                     download_file(url, filename)
                 except Exception as e:
                     if os.path.isfile(filename): os.remove(filename) 
-                    raise Exception(f"Preload URL '{url}' is invalid: {str(e)}'")
+                    raise Exception(f"{prop} '{url}' is invalid: {str(e)}'")
                 
-        model_loras = get_model_recursive_prop(model_type, "loras", return_list= True)
-        for url in model_loras:
-            filename = os.path.join(get_lora_dir(model_type), url.split("/")[-1])
-            if not os.path.isfile(filename ): 
-                if not url.startswith("http"):
-                    raise Exception(f"Lora '{filename}' was not found in the Loras Folder and no URL was provided to download it. Please add an URL in the model definition file.")
-                try:
-                    download_file(url, filename)
-                except Exception as e:
-                    if os.path.isfile(filename): os.remove(filename) 
-                    raise Exception(f"Lora URL '{url}' is invalid: {str(e)}'")
     if module_type: return            
     model_files = model_type_handler.query_model_files(computeList, base_model_type, model_filename, text_encoder_quantization)
     if not isinstance(model_files, list): model_files = [model_files]
@@ -3244,9 +3237,20 @@ def load_models(model_type, override_profile = -1):
         else: 
             print(f"Loading Module '{filename}' ...")
 
+
+    override_text_encoder = get_model_recursive_prop(model_type, "text_encoder_URLs", return_list= True)
+    if len( override_text_encoder) > 0:
+        override_text_encoder = get_model_filename(model_type=model_type, quantization= text_encoder_quantization, dtype_policy = transformer_dtype_policy, URLs=override_text_encoder) if len(override_text_encoder) > 0 else None
+        if override_text_encoder is not None:
+            override_text_encoder =  get_local_model_filename(override_text_encoder)
+            if override_text_encoder is not None:
+                print(f"Loading Text Encoder '{override_text_encoder}' ...")
+    else:
+        override_text_encoder = None
+
     wan_model, pipe = model_types_handlers[base_model_type].load_model(
                 local_model_file_list, model_type, base_model_type, model_def, quantizeTransformer = quantizeTransformer, text_encoder_quantization = text_encoder_quantization,
-                dtype = transformer_dtype, VAE_dtype = VAE_dtype, mixed_precision_transformer = mixed_precision_transformer, save_quantized = save_quantized, submodel_no_list   = model_submodel_no_list, )
+                dtype = transformer_dtype, VAE_dtype = VAE_dtype, mixed_precision_transformer = mixed_precision_transformer, save_quantized = save_quantized, submodel_no_list   = model_submodel_no_list, override_text_encoder = override_text_encoder )
 
     kwargs = {}
     profile = init_pipe(pipe, kwargs, override_profile)

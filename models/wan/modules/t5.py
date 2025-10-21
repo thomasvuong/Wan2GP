@@ -496,6 +496,12 @@ class T5EncoderModel:
                 device=device).eval().requires_grad_(False)
         logging.info(f'loading {checkpoint_path}')
         from mmgp import offload
+        # def preprocess_sd(sd):
+        #     new_sd = {}
+        #     for k,v in sd.items():
+        #         k = k.replace()
+        #     return new_sd
+        # offload.load_model_data(model,checkpoint_path, writable_tensors= False,  preprocess_sd= preprocess_sd )
         offload.load_model_data(model,checkpoint_path, writable_tensors= False )
 
         self.model = model
