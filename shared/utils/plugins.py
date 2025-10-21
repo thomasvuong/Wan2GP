@@ -42,12 +42,11 @@ def auto_install_and_enable_default_plugins(manager: 'PluginManager', wgp_global
                     config_modified = True
     
     if config_modified:
-        print("[Plugins] Enabling newly installed default plugins for this session...")
-        server_config["enabled_plugins"] = enabled_plugins
+        print("[Plugins] Disabling newly installed default plugins...")
+        server_config["enabled_plugins"] = []
         try:
             with open(server_config_filename, 'w', encoding='utf-8') as f:
                 json.dump(server_config, f, indent=4)
-            print("[Plugins] Config file updated with newly enabled plugins.")
         except Exception as e:
             print(f"[Plugins] ERROR: Failed to update config file '{server_config_filename}': {e}")
 
