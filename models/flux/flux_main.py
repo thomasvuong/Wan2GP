@@ -6,9 +6,14 @@ from glob import iglob
 from mmgp import offload as offload
 import torch
 from shared.utils.utils import calculate_new_dimensions
-from .sampling import denoise, get_schedule, prepare_kontext, prepare_prompt, prepare_multi_ip, unpack
+from .sampling import denoise, get_schedule, prepare_kontext, prepare_prompt, prepare_multi_ip, unpack, resizeinput
 from .modules.layers import get_linear_split_map
 from transformers import SiglipVisionModel, SiglipImageProcessor
+import torchvision.transforms.functional as TVF
+import math
+from shared.utils.utils import convert_image_to_tensor, convert_tensor_to_image
+from shared.utils import files_locator as fl 
+from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2Tokenizer, AutoTokenizer, Qwen2VLProcessor
 
 from .util import (
     aspect_ratio_to_height_width,
@@ -20,6 +25,35 @@ from .util import (
 )
 
 from PIL import Image
+def preprocess_ref(raw_image: Image.Image, long_size: int = 512):
+    # 获取原始图像的宽度和高度
+    image_w, image_h = raw_image.size
+
+    # 计算长边和短边
+    if image_w >= image_h:
+        new_w = long_size
+        new_h = int((long_size / image_w) * image_h)
+    else:
+        new_h = long_size
+        new_w = int((long_size / image_h) * image_w)
+
+    # 按新的宽高进行等比例缩放
+    raw_image = raw_image.resize((new_w, new_h), resample=Image.LANCZOS)
+    target_w = new_w // 16 * 16
+    target_h = new_h // 16 * 16
+
+    # 计算裁剪的起始坐标以实现中心裁剪
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    right = left + target_w
+    bottom = top + target_h
+
+    # 进行中心裁剪
+    raw_image = raw_image.crop((left, top, right, bottom))
+
+    # 转换为 RGB 模式
+    raw_image = raw_image.convert("RGB")
+    return raw_image
 
 def stitch_images(img1, img2):
     # Resize img2 to match img1's height
@@ -64,12 +98,12 @@ class model_factory:
         # self.name= "flux-schnell"
         source =  model_def.get("source", None)
         self.model = load_flow_model(self.name, model_filename[0] if source is None else source, torch_device)
-
+        self.model_def = model_def 
         self.vae = load_ae(self.name, device=torch_device)
 
         siglip_processor = siglip_model = feature_embedder = None
         if self.name == 'flux-dev-uso':
-            siglip_path = "ckpts/siglip-so400m-patch14-384"
+            siglip_path =  fl.locate_folder("siglip-so400m-patch14-384")
             siglip_processor = SiglipImageProcessor.from_pretrained(siglip_path)
             siglip_model = SiglipVisionModel.from_pretrained(siglip_path)
             siglip_model.eval().to("cpu")
@@ -86,7 +120,13 @@ class model_factory:
         self.vision_encoder = siglip_model
         self.vision_encoder_processor = siglip_processor
         self.feature_embedder = feature_embedder
-   
+
+        if self.name in ['flux-dev-kontext-dreamomni2']:
+            self.processor = Qwen2VLProcessor.from_pretrained(fl.locate_folder("Qwen2.5-VL-7B-DreamOmni2"))
+            self.vlm_model = offload.fast_load_transformers_model(fl.locate_file( os.path.join("Qwen2.5-VL-7B-DreamOmni2","Qwen2.5-VL-7B-DreamOmni2_quanto_bf16_int8.safetensors")),  writable_tensors= True , modelClass=Qwen2_5_VLForConditionalGeneration,  defaultConfigPath= fl.locate_file(os.path.join("Qwen2.5-VL-7B-DreamOmni2", "config.json")))
+        else:
+            self.processor = None
+            self.vlm_model = None
         # offload.change_dtype(self.model, dtype, True)
         # offload.save_model(self.model, "flux-dev.safetensors")
 
@@ -102,14 +142,54 @@ class model_factory:
         self.model.split_linear_modules_map = split_linear_modules_map
         offload.split_linear_modules(self.model, split_linear_modules_map )
 
+    def infer_vlm(self, input_img_path,input_instruction,prefix):
+        tp=[]
+        for path in input_img_path:
+            tp.append({"type": "image", "image": path})
+        tp.append({"type": "text", "text": input_instruction+prefix})
+        messages = [
+                {
+                    "role": "user",
+                    "content": tp,
+                }
+            ]
+
+        # Preparation for inference
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        # from .vprocess import process_vision_info
+        # image_inputs, video_inputs = process_vision_info(messages)
+        inputs = self.processor(
+            text=[text],
+            images=input_img_path,
+            # images=image_inputs,
+            # videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        )
+        inputs = inputs.to("cpu")
+
+        # Inference
+        generated_ids = self.vlm_model.generate(**inputs, do_sample=False, max_new_tokens=4096)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        output_text = self.processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        return output_text[0]
+
     
     def generate(
             self,
             seed: int | None = None,
-            input_prompt: str = "replace the logo with the text 'Black Forest Labs'",
+            input_prompt: str = "replace the logo with the text 'Black Forest Labs'",            
             n_prompt: str = None,
             sampling_steps: int = 20,
             input_ref_images = None,
+            input_frames= None,
+            input_masks= None,
             width= 832,
             height=480,
             embedded_guidance_scale: float = 2.5,
@@ -120,7 +200,8 @@ class model_factory:
             batch_size = 1,
             video_prompt_type = "",
             joint_pass = False,
-            image_refs_relative_size = 100,       
+            image_refs_relative_size = 100,
+            denoising_strength = 1.,
             **bbargs
     ):
             if self._interrupt:
@@ -129,11 +210,27 @@ class model_factory:
             if n_prompt is None or len(n_prompt) == 0: n_prompt = "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"
             device="cuda"
             flux_dev_uso = self.name in ['flux-dev-uso']
-            image_stiching =  not self.name in ['flux-dev-uso']
+            flux_dev_umo = self.name in ['flux-dev-umo']
+            flux_kontext_dreamomni2 = self.name in ['flux-dev-kontext-dreamomni2']
+            latent_stiching = flux_dev_uso or  flux_dev_umo or flux_kontext_dreamomni2
+
+            lock_dimensions=  False
 
             input_ref_images = [] if input_ref_images is None else input_ref_images[:]
-            ref_style_imgs = []
+            if flux_dev_umo:
+                ref_long_side = 512 if len(input_ref_images) <= 1 else 320
+                input_ref_images = [preprocess_ref(img, ref_long_side) for img in input_ref_images]
+                lock_dimensions = True
 
+            elif flux_kontext_dreamomni2:
+                for i, img in enumerate(input_ref_images):
+                    input_ref_images[i] = resizeinput(img)
+                input_prompt= self.infer_vlm(input_ref_images,input_prompt, " It is editing task." if "K"  in video_prompt_type else " It is generation task." )
+                input_prompt = input_prompt[6:-7]
+                print(input_prompt)
+                lock_dimensions = True
+
+            ref_style_imgs = []
             if "I" in video_prompt_type and len(input_ref_images) > 0: 
                 if flux_dev_uso :
                     if "J" in video_prompt_type:
@@ -142,33 +239,28 @@ class model_factory:
                     elif len(input_ref_images) > 1 :
                         ref_style_imgs = input_ref_images[-1:]
                         input_ref_images = input_ref_images[:-1]
-                if image_stiching:
+
+                if latent_stiching:
+                    # latents stiching with resize 
+                    if not lock_dimensions :
+                        for i in range(len(input_ref_images)):
+                            w, h = input_ref_images[i].size
+                            image_height, image_width = calculate_new_dimensions(int(height*image_refs_relative_size/100), int(width*image_refs_relative_size/100), h, w, 0)
+                            input_ref_images[i] = input_ref_images[i].resize((image_width, image_height), resample=Image.Resampling.LANCZOS) 
+                else:
                     # image stiching method
                     stiched = input_ref_images[0]
-                    if "K" in video_prompt_type :
-                        w, h = input_ref_images[0].size
-                        height, width = calculate_new_dimensions(height, width, h, w, fit_into_canvas)
-
                     for new_img in input_ref_images[1:]:
                         stiched = stitch_images(stiched, new_img)
                     input_ref_images  = [stiched]
-                else:
-                    first_ref = 0
-                    if "K" in video_prompt_type:
-                        # image latents tiling method
-                        w, h = input_ref_images[0].size
-                        height, width = calculate_new_dimensions(height, width, h, w, fit_into_canvas)
-                        input_ref_images[0] = input_ref_images[0].resize((width, height), resample=Image.Resampling.LANCZOS) 
-                        first_ref = 1
-
-                    for i in range(first_ref,len(input_ref_images)):
-                        w, h = input_ref_images[i].size
-                        image_height, image_width = calculate_new_dimensions(int(height*image_refs_relative_size/100), int(width*image_refs_relative_size/100), h, w, fit_into_canvas)
-                        input_ref_images[0] = input_ref_images[0].resize((image_width, image_height), resample=Image.Resampling.LANCZOS) 
+            elif input_frames is not None:
+                input_ref_images = [convert_tensor_to_image(input_frames) ] 
             else:
                 input_ref_images = None
+            image_mask = None if input_masks is None else convert_tensor_to_image(input_masks, mask_levels= True) 
+        
 
-            if flux_dev_uso :
+            if latent_stiching  :
                 inp, height, width = prepare_multi_ip(
                     ae=self.vae,
                     img_cond_list=input_ref_images,
@@ -177,6 +269,10 @@ class model_factory:
                     bs=batch_size,
                     seed=seed,
                     device=device,
+                    res_match_output= flux_dev_uso or flux_dev_umo,
+                    pe = 'w' if flux_kontext_dreamomni2 else 'd',
+                    set_cond_index = flux_kontext_dreamomni2,
+                    conditions_zero_start= flux_kontext_dreamomni2
                 )
             else:
                 inp, height, width = prepare_kontext(
@@ -187,6 +283,7 @@ class model_factory:
                     bs=batch_size,
                     seed=seed,
                     device=device,
+                    img_mask=image_mask,
                 )
 
             inp.update(prepare_prompt(self.t5, self.clip, batch_size, input_prompt))
@@ -208,14 +305,26 @@ class model_factory:
                 return unpack(x.float(), height, width) 
 
             # denoise initial noise
-            x = denoise(self.model, **inp, timesteps=timesteps, guidance=embedded_guidance_scale, real_guidance_scale =guide_scale, callback=callback, pipeline=self, loras_slists= loras_slists, unpack_latent = unpack_latent, joint_pass = joint_pass)
+            x = denoise(self.model, **inp, timesteps=timesteps, guidance=embedded_guidance_scale, real_guidance_scale =guide_scale, callback=callback, pipeline=self, loras_slists= loras_slists, unpack_latent = unpack_latent, joint_pass = joint_pass, denoising_strength = denoising_strength)
             if x==None: return None
             # decode latents to pixel space
             x = unpack_latent(x)
             with torch.autocast(device_type=device, dtype=torch.bfloat16):
                 x = self.vae.decode(x)
 
+            if image_mask is not None:
+                img_msk_rebuilt = inp["img_msk_rebuilt"]
+                img= input_frames.squeeze(1).unsqueeze(0) # convert_image_to_tensor(image_guide) 
+                x = img * (1 - img_msk_rebuilt) + x.to(img) * img_msk_rebuilt 
+
             x = x.clamp(-1, 1)
             x = x.transpose(0, 1)
             return x
 
+    def get_loras_transformer(self, get_model_recursive_prop, model_type, model_mode, video_prompt_type, **kwargs):
+        if model_type != "flux_dev_kontext_dreamomni2": return [], []
+
+        preloadURLs = get_model_recursive_prop(model_type,  "preload_URLs")
+        if len(preloadURLs) < 2: return [], []
+        edit = "K" in video_prompt_type
+        return [ fl.locate_file(os.path.basename(preloadURLs[0 if edit else 1]))] , [1]

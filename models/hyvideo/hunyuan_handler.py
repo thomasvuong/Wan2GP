@@ -1,12 +1,13 @@
 import torch
+from shared.utils import files_locator as fl 
 
 def get_hunyuan_text_encoder_filename(text_encoder_quantization):
     if text_encoder_quantization =="int8":
-        text_encoder_filename = "ckpts/llava-llama-3-8b/llava-llama-3-8b-v1_1_vlm_quanto_int8.safetensors"
+        text_encoder_filename = "llava-llama-3-8b/llava-llama-3-8b-v1_1_vlm_quanto_int8.safetensors"
     else:
-        text_encoder_filename = "ckpts/llava-llama-3-8b/llava-llama-3-8b-v1_1_vlm_fp16.safetensors"
+        text_encoder_filename = "llava-llama-3-8b/llava-llama-3-8b-v1_1_vlm_fp16.safetensors"
 
-    return text_encoder_filename
+    return fl.locate_file(text_encoder_filename, True)
 
 class family_handler():
 
@@ -51,10 +52,37 @@ class family_handler():
         extra_model_def["tea_cache"] = True
         extra_model_def["mag_cache"] = True
 
-        if base_model_type in ["hunyuan_avatar"]: extra_model_def["no_background_removal"] = True
+        if base_model_type in ["hunyuan_custom_edit"]:
+            extra_model_def["guide_preprocessing"] = {
+                "selection": ["MV", "PV"],
+            }
 
-        if base_model_type in ["hunyuan_custom", "hunyuan_custom_edit", "hunyuan_audio", "hunyuan_avatar"]:
+            extra_model_def["mask_preprocessing"] = {
+                "selection": ["A", "NA"],
+                "default" : "NA"
+            }
+
+        if base_model_type in ["hunyuan_custom_audio", "hunyuan_custom_edit", "hunyuan_custom"]:
+            extra_model_def["image_ref_choices"] = {
+                "choices": [("Reference Image", "I")],
+                "letters_filter":"I",
+                "visible": False,
+            }
+
+        if base_model_type in ["hunyuan_avatar"]: 
+            extra_model_def["image_ref_choices"] = {
+                "choices": [("Start Image", "KI")],
+                "letters_filter":"KI",
+                "visible": False,
+            }
+            extra_model_def["no_background_removal"] = True
+
+        if base_model_type in ["hunyuan_custom", "hunyuan_custom_edit", "hunyuan_custom_audio", "hunyuan_avatar"]:
             extra_model_def["one_image_ref_needed"] = True
+
+
+        if base_model_type in ["hunyuan_i2v"]:
+            extra_model_def["image_prompt_types_allowed"] = "S"
 
         return extra_model_def
 
@@ -102,7 +130,7 @@ class family_handler():
         } 
 
     @staticmethod
-    def load_model(model_filename, model_type = None,  base_model_type = None, model_def = None, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False):
+    def load_model(model_filename, model_type = None,  base_model_type = None, model_def = None, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False, submodel_no_list = None, override_text_encoder = None):
         from .hunyuan import HunyuanVideoSampler
         from mmgp import offload
 
@@ -110,7 +138,7 @@ class family_handler():
             model_filepath = model_filename,
             model_type = model_type, 
             base_model_type = base_model_type,
-            text_encoder_filepath = get_hunyuan_text_encoder_filename(text_encoder_quantization),
+            text_encoder_filepath = get_hunyuan_text_encoder_filename(text_encoder_quantization) if override_text_encoder is None else override_text_encoder,
             dtype = dtype,
             quantizeTransformer = quantizeTransformer,
             VAE_dtype = VAE_dtype, 
@@ -138,6 +166,24 @@ class family_handler():
         return hunyuan_model, pipe
 
     @staticmethod
+    def fix_settings(base_model_type, settings_version, model_def, ui_defaults):
+        if settings_version<2.33:
+            if base_model_type in ["hunyuan_custom_edit"]:
+                video_prompt_type=  ui_defaults["video_prompt_type"]
+                if "P" in video_prompt_type and "M" in video_prompt_type: 
+                    video_prompt_type = video_prompt_type.replace("M","")
+                    ui_defaults["video_prompt_type"] = video_prompt_type  
+
+        if settings_version < 2.36:
+            if base_model_type in ["hunyuan_avatar", "hunyuan_custom_audio"]:
+                audio_prompt_type=  ui_defaults["audio_prompt_type"]
+                if "A" not in audio_prompt_type:
+                    audio_prompt_type += "A"
+                    ui_defaults["audio_prompt_type"] = audio_prompt_type  
+
+        
+    
+    @staticmethod
     def update_default_settings(base_model_type, model_def, ui_defaults):
         ui_defaults["embedded_guidance_scale"]= 6.0
 
@@ -158,6 +204,7 @@ class family_handler():
                 "guidance_scale": 7.5,
                 "flow_shift": 13,
                 "video_prompt_type": "I",
+                "audio_prompt_type": "A",
             })
         elif base_model_type in ["hunyuan_custom_edit"]:
             ui_defaults.update({
@@ -174,4 +221,5 @@ class family_handler():
                 "skip_steps_start_step_perc": 25, 
                 "video_length": 129,
                 "video_prompt_type": "KI",
+                "audio_prompt_type": "A",
             })

@@ -1,11 +1,12 @@
 import torch
+from shared.utils import files_locator as fl 
 
 
 def get_ltxv_text_encoder_filename(text_encoder_quantization):
-    text_encoder_filename = "ckpts/T5_xxl_1.1/T5_xxl_1.1_enc_bf16.safetensors"
+    text_encoder_filename = "T5_xxl_1.1/T5_xxl_1.1_enc_bf16.safetensors"
     if text_encoder_quantization =="int8":
         text_encoder_filename = text_encoder_filename.replace("bf16", "quanto_bf16_int8") 
-    return text_encoder_filename
+    return fl.locate_file(text_encoder_filename, True)
 
 class family_handler():
     @staticmethod
@@ -24,7 +25,19 @@ class family_handler():
         extra_model_def["frames_minimum"] = 17
         extra_model_def["frames_steps"] = 8
         extra_model_def["sliding_window"] = True
+        extra_model_def["image_prompt_types_allowed"] = "TSEV"
 
+        extra_model_def["guide_preprocessing"] = {
+            "selection": ["", "PV", "DV", "EV", "V"],
+            "labels" : { "V": "Use LTXV raw format"}
+        }
+
+        extra_model_def["mask_preprocessing"] = {
+            "selection": ["", "A", "NA", "XA", "XNA"],
+        }
+
+        extra_model_def["extra_control_frames"] = 1
+        extra_model_def["dont_cat_preguide"]= True
         return extra_model_def
 
     @staticmethod
@@ -64,12 +77,12 @@ class family_handler():
 
 
     @staticmethod
-    def load_model(model_filename, model_type, base_model_type, model_def, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False):
+    def load_model(model_filename, model_type, base_model_type, model_def, quantizeTransformer = False, text_encoder_quantization = None, dtype = torch.bfloat16, VAE_dtype = torch.float32, mixed_precision_transformer = False, save_quantized = False, submodel_no_list = None, override_text_encoder = None):
         from .ltxv import LTXV
 
         ltxv_model = LTXV(
             model_filepath = model_filename,
-            text_encoder_filepath = get_ltxv_text_encoder_filename(text_encoder_quantization),
+            text_encoder_filepath = get_ltxv_text_encoder_filename(text_encoder_quantization) if override_text_encoder is None else override_text_encoder,
             model_type = model_type, 
             base_model_type = base_model_type,
             model_def = model_def,

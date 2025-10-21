@@ -9,6 +9,7 @@ imageio-ffmpeg
 einops
 sentencepiece
 open_clip_torch>=2.29.0
+numpy==2.1.2
 
 # Video & media
 moviepy==1.0.3
@@ -20,19 +21,27 @@ soundfile
 mutagen
 pyloudnorm
 librosa==0.11.0
+speechbrain==1.0.3
+audio-separator==0.36.1
 
 # UI & interaction
-gradio==5.23.0
+gradio==5.29.0
 dashscope
 loguru
+s3tokenizer
+conformer==0.3.2
+spacy_pkuseg
 
 # Vision & segmentation
-opencv-python>=4.9.0.80
+opencv-python>=4.12.0.88
 segment-anything
 rembg[gpu]==2.0.65
-onnxruntime-gpu
+onnxruntime-gpu==1.22
 decord
 timm
+insightface @ https://github.com/deepbeepmeep/insightface/raw/refs/heads/master/wheels/insightface-0.7.3-cp310-cp310-win_amd64.whl ; sys_platform == "win32" and python_version == "3.10"
+insightface==0.7.3 ; sys_platform == "linux"
+facexlib==0.3.0
 
 # Config & orchestration
 omegaconf
@@ -43,15 +52,16 @@ pydantic==2.10.6
 # Math & modeling
 torchdiffeq>=0.2.5
 tensordict>=0.6.1
-mmgp==3.5.10
+mmgp==3.6.6
 peft==0.15.0
 matplotlib
 
 # Utilities
 ftfy
 piexif
-pynvml
+nvidia-ml-py 
 misaki
+gitpython
 
 # Optional / commented out
 # transformers==4.46.3  # for llamallava pre-patch

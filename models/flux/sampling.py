@@ -129,6 +129,19 @@ def prepare_redux(
         "vec": vec.to(img.device),
     }
 
+def resizeinput(img):
+    multiple_of = 16
+    image_height, image_width = img.height, img.width
+    aspect_ratio = image_width / image_height
+    _, image_width, image_height = min(
+        (abs(aspect_ratio - w / h), w, h) for w, h in PREFERED_KONTEXT_RESOLUTIONS
+    )
+    image_width = image_width // multiple_of * multiple_of
+    image_height = image_height // multiple_of * multiple_of
+    if (image_width, image_height) != img.size:
+        img = img.resize((image_width, image_height), Image.LANCZOS)
+    return img
+
 
 def prepare_kontext(
     ae: AutoEncoder,
@@ -138,9 +151,11 @@ def prepare_kontext(
     target_width: int | None = None,
     target_height: int | None = None,
     bs: int = 1,
-
+    img_mask = None,
 ) -> tuple[dict[str, Tensor], int, int]:
     # load and encode the conditioning image
+
+    res_match_output = img_mask is not None
 
     img_cond_seq = None
     img_cond_seq_ids = None
@@ -148,16 +163,14 @@ def prepare_kontext(
     height_offset = 0
     width_offset = 0
     for cond_no, img_cond in enumerate(img_cond_list): 
+        if res_match_output:
+            if img_cond.size != (target_width, target_height):
+                img_cond = img_cond.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        else:
+            img_cond = resizeinput(img_cond)
         width, height = img_cond.size
-        aspect_ratio = width / height
+        width, height = width // 8, height // 8
 
-        # Kontext is trained on specific resolutions, using one of them is recommended
-        _, width, height = min((abs(aspect_ratio - w / h), w, h) for w, h in PREFERED_KONTEXT_RESOLUTIONS)
-
-        width = 2 * int(width / 16)
-        height = 2 * int(height / 16)
-
-        img_cond = img_cond.resize((8 * width, 8 * height), Image.Resampling.LANCZOS)
         img_cond = np.array(img_cond)
         img_cond = torch.from_numpy(img_cond).float() / 127.5 - 1.0
         img_cond = rearrange(img_cond, "h w c -> 1 c h w")
@@ -194,6 +207,19 @@ def prepare_kontext(
         "img_cond_seq": img_cond_seq,
         "img_cond_seq_ids": img_cond_seq_ids,
     }
+    if img_mask is not None:
+        from shared.utils.utils import convert_image_to_tensor, convert_tensor_to_image
+        # image_height, image_width = calculate_new_dimensions(ref_height, ref_width, image_height, image_width, False, block_size=multiple_of)
+        image_mask_latents = convert_image_to_tensor(img_mask.resize((target_width // 16, target_height // 16), resample=Image.Resampling.LANCZOS))
+        image_mask_latents = torch.where(image_mask_latents>-0.5, 1., 0. )[0:1]
+        image_mask_rebuilt = image_mask_latents.repeat_interleave(16, dim=-1).repeat_interleave(16, dim=-2).unsqueeze(0)
+        # convert_tensor_to_image( image_mask_rebuilt.squeeze(0).repeat(3,1,1)).save("mmm.png")
+        image_mask_latents = image_mask_latents.reshape(1, -1, 1).to(device)        
+        return_dict.update({
+            "img_msk_latents": image_mask_latents,
+            "img_msk_rebuilt": image_mask_rebuilt,
+        })
+
     img = get_noise(
         bs,
         target_height,
@@ -265,6 +291,9 @@ def denoise(
     loras_slists=None,
     unpack_latent = None,
     joint_pass= False,
+    img_msk_latents = None,
+    img_msk_rebuilt = None,
+    denoising_strength = 1,
 ):
 
     kwargs = {'pipeline': pipeline, 'callback': callback, "img_len" : img.shape[1], "siglip_embedding": siglip_embedding, "siglip_embedding_ids": siglip_embedding_ids}
@@ -272,18 +301,37 @@ def denoise(
     if callback != None:
         callback(-1, None, True)
 
+    original_image_latents = None if img_cond_seq is None else img_cond_seq.clone() 
+    original_timesteps = timesteps
+    morph, first_step = False, 0
+    if img_msk_latents is not None:
+        randn = torch.randn_like(original_image_latents)
+        if denoising_strength < 1.:
+            first_step = int(len(timesteps) * (1. - denoising_strength))
+        if not morph:
+            latent_noise_factor = timesteps[first_step]
+            latents  = original_image_latents  * (1.0 - latent_noise_factor) + randn * latent_noise_factor
+            img = latents.to(img)
+            latents = None
+            timesteps = timesteps[first_step:]
+
+
     updated_num_steps= len(timesteps) -1
     if callback != None:
         from shared.utils.loras_mutipliers import update_loras_slists
-        update_loras_slists(model, loras_slists, updated_num_steps)
+        update_loras_slists(model, loras_slists, len(original_timesteps))
         callback(-1, None, True, override_num_inference_steps = updated_num_steps)
     from mmgp import offload
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
     for i, (t_curr, t_prev) in enumerate(zip(timesteps[:-1], timesteps[1:])):
-        offload.set_step_no_for_lora(model, i)
+        offload.set_step_no_for_lora(model, first_step  + i)
         if pipeline._interrupt:
             return None
+
+        if img_msk_latents is not None and denoising_strength <1. and i == first_step and morph:
+            latent_noise_factor = t_curr/1000
+            img  = original_image_latents  * (1.0 - latent_noise_factor) + img * latent_noise_factor 
 
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
         img_input = img
@@ -334,6 +382,14 @@ def denoise(
             pred = neg_pred + real_guidance_scale * (pred - neg_pred)
 
         img += (t_prev - t_curr) * pred
+
+        if img_msk_latents is not None:
+            latent_noise_factor = t_prev
+            # noisy_image  = original_image_latents  * (1.0 - latent_noise_factor) + torch.randn_like(original_image_latents) * latent_noise_factor 
+            noisy_image  = original_image_latents  * (1.0 - latent_noise_factor) + randn * latent_noise_factor 
+            img  =  noisy_image * (1-img_msk_latents)  + img_msk_latents * img
+            noisy_image = None
+
         if callback is not None:
             preview = unpack_latent(img).transpose(0,1)
             callback(i, preview, False)         
@@ -350,9 +406,19 @@ def prepare_multi_ip(
     target_height: int | None = None,
     bs: int = 1,
     pe: Literal["d", "h", "w", "o"] = "d",
+    conditions_zero_start = False,
+    set_cond_index = False,
+    res_match_output = True,
+    
 ) -> dict[str, Tensor]:
-    ref_imgs = img_cond_list
+
     assert pe in ["d", "h", "w", "o"]
+
+    if img_cond_list == None: img_cond_list = []
+
+    if not res_match_output:
+        for i, img_cond in enumerate(img_cond_list):
+            img_cond_list[i]= resizeinput(img_cond)
 
     ref_imgs = [
         ae.encode(
@@ -375,7 +441,10 @@ def prepare_multi_ip(
     img_ids[..., 2] = img_ids[..., 2] + torch.arange(w // 2)[None, :]
     img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
     img_cond_seq = img_cond_seq_ids = None
-    pe_shift_w, pe_shift_h = w // 2, h // 2
+    if conditions_zero_start:
+        pe_shift_w = pe_shift_h = 0
+    else:
+        pe_shift_w, pe_shift_h = w // 2, h // 2
     for cond_no, ref_img in enumerate(ref_imgs):
         _, _, ref_h1, ref_w1 = ref_img.shape
         ref_img = rearrange(
@@ -384,7 +453,8 @@ def prepare_multi_ip(
         if ref_img.shape[0] == 1 and bs > 1:
             ref_img = repeat(ref_img, "1 ... -> bs ...", bs=bs)
         ref_img_ids1 = torch.zeros(ref_h1 // 2, ref_w1 // 2, 3)
-        # img id分别在宽高偏移各自最大值
+        if set_cond_index:
+            ref_img_ids1[..., 0] = cond_no + 1
         h_offset = pe_shift_h if pe in {"d", "h"} else 0
         w_offset = pe_shift_w if pe in {"d", "w"} else 0
         ref_img_ids1[..., 1] = (
