@@ -86,7 +86,11 @@ class Runner:
         else:
             self.ema = None
 
-        self.rng = torch.Generator(device='cuda')
+        try:
+            self.rng = torch.Generator(device='cuda')
+        except RuntimeError:
+            # CUDA not available, use CPU generator
+            self.rng = torch.Generator(device='cpu')
         self.rng.manual_seed(cfg['seed'] + local_rank)
 
         # setting up feature extractors and VAEs

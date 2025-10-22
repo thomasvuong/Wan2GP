@@ -49,7 +49,7 @@ def get_model(persistent_models = False, verboseLevel = 1) -> tuple[MMAudio, Fea
                                     bigvgan_vocoder_ckpt=model.bigvgan_16k_path,
                                     need_vae_encoder=False)
         feature_utils = feature_utils.to(device, dtype).eval()
-        feature_utils.device = "cuda"
+        feature_utils.device = device
 
         pipe = { "net" : net, "clip" : feature_utils.clip_model, "syncformer" : feature_utils.synchformer, "vocode" : feature_utils.tod.vocoder, "vae" : feature_utils.tod.vae }
         from mmgp import offload
@@ -82,7 +82,11 @@ def video_to_audio(video, prompt: str, negative_prompt: str, seed: int, num_step
 
     net, feature_utils, seq_cfg, offloadobj = get_model(persistent_models, verboseLevel )
 
-    rng = torch.Generator(device="cuda")
+    try:
+        rng = torch.Generator(device="cuda")
+    except RuntimeError:
+        # CUDA not available, use CPU generator
+        rng = torch.Generator(device="cpu")
     if seed >= 0:
         rng.manual_seed(seed)
     else:

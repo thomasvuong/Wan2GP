@@ -96,7 +96,10 @@ def release_model():
     if offloadobj is not None:
         offloadobj.release()
         offloadobj = None
-        torch.cuda.empty_cache()
+        try:
+            torch.cuda.empty_cache()
+        except (AssertionError, RuntimeError):
+            pass  # CUDA not available
         gc.collect()
         try:
             torch._C._host_emptyCache()
@@ -1781,17 +1784,27 @@ attention_modes_installed = get_attention_modes()
 attention_modes_supported = get_supported_attention_modes()
 args = _parse_args()
 
-gpu_major, gpu_minor = torch.cuda.get_device_capability(args.gpu if len(args.gpu) > 0 else None)
-if  gpu_major < 8:
-    print("Switching to FP16 models when possible as GPU architecture doesn't support optimed BF16 Kernels")
+try:
+    gpu_major, gpu_minor = torch.cuda.get_device_capability(args.gpu if len(args.gpu) > 0 else None)
+    if  gpu_major < 8:
+        print("Switching to FP16 models when possible as GPU architecture doesn't support optimed BF16 Kernels")
+        bfloat16_supported = False
+    else:
+        bfloat16_supported = True
+except (AssertionError, RuntimeError):
+    # CUDA not available (e.g., on Apple Silicon Macs)
+    gpu_major, gpu_minor = 0, 0
     bfloat16_supported = False
-else:
-    bfloat16_supported = True
 
 args.flow_reverse = True
 processing_device = args.gpu
 if len(processing_device) == 0:
-    processing_device ="cuda"
+    if torch.cuda.is_available():
+        processing_device = "cuda"
+    elif torch.backends.mps.is_available():
+        processing_device = "mps"
+    else:
+        processing_device = "cpu"
 # torch.backends.cuda.matmul.allow_fp16_accumulation = True
 lock_ui_attention = False
 lock_ui_transformer = False
@@ -2955,7 +2968,14 @@ def load_models(model_type, override_profile = -1):
     loras_transformer = ["transformer"]
     if "transformer2" in pipe:
         loras_transformer += ["transformer2"]        
-    offloadobj = offload.profile(pipe, profile_no= profile, compile = compile, quantizeTransformer = False, loras = loras_transformer, coTenantsMap= {}, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, **kwargs)  
+    try:
+        offloadobj = offload.profile(pipe, profile_no= profile, compile = compile, quantizeTransformer = False, loras = loras_transformer, coTenantsMap= {}, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, **kwargs)
+    except (AssertionError, RuntimeError) as e:
+        if "CUDA" in str(e):
+            print("CUDA not available, using CPU-only mode without memory management optimization")
+            offloadobj = None
+        else:
+            raise e  
     if len(args.gpu) > 0:
         torch.set_default_device(args.gpu)
     transformer_type = model_type
@@ -3174,7 +3194,8 @@ def build_callback(state, pipe, send_cmd, status, num_inference_steps):
             pause_msg = None
             if process_status.startswith("request:"):        
                 gen["process_status"] = "process:" + process_status[len("request:"):]
-                offloadobj.unload_all()
+                if offloadobj is not None:
+                    offloadobj.unload_all()
                 pause_msg = gen.get("pause_msg", "Unknown Pause")
                 in_pause = True
 
@@ -3829,7 +3850,10 @@ def extract_faces_from_video_with_mask(input_video_path, input_mask_path, max_fr
 
     face_processor = None
     gc.collect()
-    torch.cuda.empty_cache()
+    try:
+        torch.cuda.empty_cache()
+    except (AssertionError, RuntimeError):
+        pass  # CUDA not available
 
     face_tensor= torch.tensor(np.stack(face_list, dtype= np.float32) / 127.5 - 1).permute(-1, 0, 1, 2 ) # t h w c -> c t h w
     if pad_frames > 0:
@@ -4031,7 +4055,10 @@ def preprocess_video_with_mask(input_video_path, input_mask_path, height, width,
     preproc = None
     preproc_outside = None
     gc.collect()
-    torch.cuda.empty_cache()
+    try:
+        torch.cuda.empty_cache()
+    except (AssertionError, RuntimeError):
+        pass  # CUDA not available
     if pad_frames > 0:
         masked_frames = masked_frames[0] * pad_frames + masked_frames
         if any_mask: masked_frames = masks[0] * pad_frames + masks
@@ -4194,7 +4221,10 @@ def set_seed(seed):
     import random
     seed = random.randint(0, 99999999) if seed == None or seed < 0 else seed
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    try:
+        torch.cuda.manual_seed_all(seed)
+    except (AssertionError, RuntimeError):
+        pass  # CUDA not available
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
@@ -4513,7 +4543,14 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
     if enhancer_offloadobj is None:
         profile = init_pipe(pipe, kwargs, override_profile)
         setup_prompt_enhancer(pipe, kwargs)
-        enhancer_offloadobj = offload.profile(pipe, profile_no= profile, **kwargs)  
+        try:
+            enhancer_offloadobj = offload.profile(pipe, profile_no= profile, **kwargs)
+        except (AssertionError, RuntimeError) as e:
+            if "CUDA" in str(e):
+                print("CUDA not available for enhancer, using CPU-only mode")
+                enhancer_offloadobj = None
+            else:
+                raise e  
 
     original_image_refs = inputs["image_refs"]
     if original_image_refs is not None:
@@ -4530,7 +4567,8 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
         try:
             enhanced_prompt = process_prompt_enhancer(prompt_enhancer, [one_prompt],  start_images, original_image_refs, is_image, seed )    
         except Exception as e:
-            enhancer_offloadobj.unload_all()
+            if enhancer_offloadobj is not None:
+                enhancer_offloadobj.unload_all()
             with gen_lock:
                 gen["process_status"] = original_process_status
             raise gr.Error(e)
@@ -4539,7 +4577,8 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
             enhanced_prompts.append(prefix + " " + one_prompt)
             enhanced_prompts.append(enhanced_prompt)
 
-    enhancer_offloadobj.unload_all()
+    if enhancer_offloadobj is not None:
+        enhancer_offloadobj.unload_all()
     with gen_lock:
         gen["process_status"] = original_process_status
 
@@ -4723,7 +4762,11 @@ def generate_video(
         slg_layers = None
 
     offload.shared_state["_attention"] =  attn
-    device_mem_capacity = torch.cuda.get_device_properties(0).total_memory / 1048576
+    try:
+        device_mem_capacity = torch.cuda.get_device_properties(0).total_memory / 1048576
+    except (AssertionError, RuntimeError):
+        # CUDA not available (e.g., on Apple Silicon Macs)
+        device_mem_capacity = 8192  # Default to 8GB for CPU mode
     if hasattr(wan_model.vae, "get_VAE_tile_size"):
         VAE_tile_size = wan_model.vae.get_VAE_tile_size(vae_config, device_mem_capacity, server_config.get("vae_precision", "16") == "32")
     else:
@@ -4779,7 +4822,11 @@ def generate_video(
 
     current_video_length = video_length
     # VAE Tiling
-    device_mem_capacity = torch.cuda.get_device_properties(None).total_memory / 1048576
+    try:
+        device_mem_capacity = torch.cuda.get_device_properties(None).total_memory / 1048576
+    except (AssertionError, RuntimeError):
+        # CUDA not available (e.g., on Apple Silicon Macs)
+        device_mem_capacity = 8192  # Default to 8GB for CPU mode
     guide_inpaint_color = model_def.get("guide_inpaint_color", 127.5)
     extract_guide_from_window_start = model_def.get("extract_guide_from_window_start", False) 
     hunyuan_custom = "hunyuan_video_custom" in model_filename
@@ -4938,7 +4985,10 @@ def generate_video(
     os.makedirs(save_path, exist_ok=True)
     os.makedirs(image_save_path, exist_ok=True)
     gc.collect()
-    torch.cuda.empty_cache()
+    try:
+        torch.cuda.empty_cache()
+    except (AssertionError, RuntimeError):
+        pass  # CUDA not available
     wan_model._interrupt = False
     abort = False
     if gen.get("abort", False):
@@ -5176,7 +5226,10 @@ def generate_video(
                             face_arc_embeds = face_arc_embeds.squeeze(0).cpu()
                             face_encoder = image_pil = None
                             gc.collect()
-                            torch.cuda.empty_cache()
+                            try:
+                                torch.cuda.empty_cache()
+                            except (AssertionError, RuntimeError):
+                                pass  # CUDA not available
 
                         if remove_background_images_ref > 0:
                             send_cmd("progress", [0, get_latest_status(state, "Removing Images References Background")])
@@ -5260,6 +5313,11 @@ def generate_video(
             callback = build_callback(state, trans, send_cmd, status, num_inference_steps)
             progress_args = [0, merge_status_context(status, "Encoding Prompt")]
             send_cmd("progress", progress_args)
+            
+            # Add timeout protection for encoding phase
+            import signal
+            encoding_start_time = time.time()
+            encoding_timeout = 300  # 5 minutes timeout for encoding
 
             if skip_steps_cache !=  None:
                 skip_steps_cache.update({
@@ -5275,6 +5333,10 @@ def generate_video(
                 send_cmd("output")
 
             try:
+                # Check for encoding timeout
+                if time.time() - encoding_start_time > encoding_timeout:
+                    raise TimeoutError(f"Encoding phase timed out after {encoding_timeout} seconds")
+                
                 samples = wan_model.generate(
                     input_prompt = prompt,
                     image_start = image_start_tensor,  
@@ -5354,17 +5416,32 @@ def generate_video(
                     outpainting_dims = outpainting_dims,
                     face_arc_embeds = face_arc_embeds,
                 )
+            except TimeoutError as e:
+                print(f"Generation timeout: {e}")
+                gen["process_status"] = "error"
+                gen["error_message"] = str(e)
+                send_cmd("progress", [0, f"Error: {e}"])
+                raise gr.Error(f"Generation timed out: {e}")
             except Exception as e:
                 if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
                     cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
                 remove_temp_filenames(temp_filenames_list)
                 clear_gen_cache()
-                offloadobj.unload_all()
+                if offloadobj is not None:
+                    offloadobj.unload_all()
                 trans.cache = None 
-                offload.unload_loras_from_model(trans)
+                try:
+                    offload.unload_loras_from_model(trans)
+                except AttributeError:
+                    # Model doesn't have _loras_model_data attribute
+                    pass
                 if trans2 is not None: 
                     trans2.cache = None 
-                    offload.unload_loras_from_model(trans2)
+                    try:
+                        offload.unload_loras_from_model(trans2)
+                    except AttributeError:
+                        # Model doesn't have _loras_model_data attribute
+                        pass
                 skip_steps_cache = None
                 # if compile:
                 #     cache_size = torch._dynamo.config.cache_size_limit                                      
@@ -5372,7 +5449,10 @@ def generate_video(
                 #     torch._dynamo.config.cache_size_limit = cache_size
 
                 gc.collect()
-                torch.cuda.empty_cache()
+                try:
+                    torch.cuda.empty_cache()
+                except (AssertionError, RuntimeError):
+                    pass  # CUDA not available
                 s = str(e)
                 keyword_list = {"CUDA out of memory" : "VRAM", "Tried to allocate":"VRAM", "CUDA error: out of memory": "RAM", "CUDA error: too many resources requested": "RAM"}
                 crash_type = ""
@@ -5404,9 +5484,13 @@ def generate_video(
                     samples= samples["x"]
                 samples = samples.to("cpu")
             clear_gen_cache()
-            offloadobj.unload_all()
+            if offloadobj is not None:
+                offloadobj.unload_all()
             gc.collect()
-            torch.cuda.empty_cache()
+            try:
+                torch.cuda.empty_cache()
+            except (AssertionError, RuntimeError):
+                pass  # CUDA not available
 
             # time_flag = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d-%Hh%Mm%Ss")
             # save_prompt = "_in_" + original_prompts[0]
@@ -5588,10 +5672,18 @@ def generate_video(
         seed = set_seed(-1)
     clear_status(state)
     trans.cache = None
-    offload.unload_loras_from_model(trans)
+    try:
+        offload.unload_loras_from_model(trans)
+    except AttributeError:
+        # Model doesn't have _loras_model_data attribute
+        pass
     if not trans2 is None:
         trans2.cache = None
-        offload.unload_loras_from_model(trans2)
+        try:
+            offload.unload_loras_from_model(trans2)
+        except AttributeError:
+            # Model doesn't have _loras_model_data attribute
+            pass
 
     if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
         cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
@@ -5746,7 +5838,10 @@ def process_tasks(state):
                 gen["progress_args"] = data
                 # progress(*data)
             elif cmd == "preview":
-                torch.cuda.current_stream().synchronize()
+                try:
+                    torch.cuda.current_stream().synchronize()
+                except (AssertionError, RuntimeError):
+                    pass  # CUDA not available
                 preview= None if data== None else generate_preview(params["model_type"], data) 
                 gen["preview"] = preview
                 yield time.time() , gr.Text()
@@ -5836,7 +5931,7 @@ def clear_status(state):
 
 def get_latest_status(state, context=""):
     gen = get_gen_info(state)
-    prompt_no = gen["prompt_no"] 
+    prompt_no = gen.get("prompt_no", 0) 
     prompts_max = gen.get("prompts_max",0)
     total_generation = gen.get("total_generation", 1)
     repeat_no = gen.get("repeat_no",0)

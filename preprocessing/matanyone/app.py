@@ -24,7 +24,12 @@ from shared.utils.audio_video import save_video, save_image
 from mmgp import offload
 from shared.utils import files_locator as fl 
 
-arg_device = "cuda"
+if torch.cuda.is_available():
+    arg_device = "cuda"
+elif torch.backends.mps.is_available():
+    arg_device = "mps"
+else:
+    arg_device = "cpu"
 arg_sam_model_type="vit_h"
 arg_mask_save = False
 model_loaded = False
@@ -685,14 +690,20 @@ def load_unload_models(selected):
             # sam_checkpoint = load_file_from_url(sam_checkpoint_url_dict[arg_sam_model_type], ".")
             sam_checkpoint = None
 
-            transfer_stream = torch.cuda.Stream()
-            with torch.cuda.stream(transfer_stream):
-                # initialize sams
-                major, minor = torch.cuda.get_device_capability(arg_device)
-                if  major < 8:
-                    bfloat16_supported = False
-                else:
-                    bfloat16_supported = True
+            try:
+                transfer_stream = torch.cuda.Stream()
+                with torch.cuda.stream(transfer_stream):
+                    # initialize sams
+                    major, minor = torch.cuda.get_device_capability(arg_device)
+                    if  major < 8:
+                        bfloat16_supported = False
+                    else:
+                        bfloat16_supported = True
+            except (AssertionError, RuntimeError):
+                # CUDA not available (e.g., on Apple Silicon Macs)
+                transfer_stream = None
+                major, minor = 0, 0
+                bfloat16_supported = False
 
                 model = MaskGenerator(sam_checkpoint, "cpu")
                 model.samcontroler.sam_controler.model.to("cpu").to(torch.bfloat16).to(arg_device)

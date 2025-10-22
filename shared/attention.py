@@ -5,8 +5,13 @@ from mmgp import offload
 import torch.nn.functional as F
 import warnings
 
-major, minor = torch.cuda.get_device_capability(None)
-bfloat16_supported =  major >= 8 
+try:
+    major, minor = torch.cuda.get_device_capability(None)
+    bfloat16_supported = major >= 8 
+except (AssertionError, RuntimeError):
+    # CUDA not available (e.g., on Apple Silicon Macs)
+    major, minor = 0, 0
+    bfloat16_supported = False 
 
 try:
     from xformers.ops import memory_efficient_attention
@@ -160,7 +165,12 @@ def get_attention_modes():
 
 def get_supported_attention_modes():
     ret = get_attention_modes()
-    major, minor = torch.cuda.get_device_capability()
+    try:
+        major, minor = torch.cuda.get_device_capability()
+    except (AssertionError, RuntimeError):
+        # CUDA not available (e.g., on Apple Silicon Macs)
+        major, minor = 0, 0
+    
     if  major < 10:
         if "sage3" in ret:
             ret.remove("sage3")
@@ -182,8 +192,8 @@ __all__ = [
     'attention',
 ]
 
-def get_cu_seqlens(batch_size, lens, max_len):
-    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device="cuda")
+def get_cu_seqlens(batch_size, lens, max_len, device="cuda"):
+    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device=device)
 
     for i in range(batch_size):
         s = lens[i] 
@@ -208,10 +218,21 @@ def pay_attention(
     cross_attn= False,
     q_lens = None,
     k_lens = None,
+    device=None,
 ):
     # format : torch.Size([batches, tokens, heads, head_features])
     # assume if q_lens is non null, each q is padded up to lq (one q out of two will need to be discarded or ignored)
     # assume if k_lens is non null, each k is padded up to lk (one k out of two will need to be discarded or ignored)
+    
+    # Auto-detect device if not provided
+    if device is None:
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+    
     if attention_mask != None:
         force_attention = "sdpa"
         if  attention_mask.dtype == torch.bfloat16 and not bfloat16_supported:
@@ -294,17 +315,17 @@ def pay_attention(
             k = k.reshape(-1, *k.shape[-2:])
             v = v.reshape(-1, *v.shape[-2:])
             q = q.reshape(-1, *q.shape[-2:])
-            cu_seqlens_q=get_cu_seqlens(b, q_lens, lq) 
-            cu_seqlens_k=get_cu_seqlens(b, k_lens, lk) 
+            cu_seqlens_q=get_cu_seqlens(b, q_lens, lq, device) 
+            cu_seqlens_k=get_cu_seqlens(b, k_lens, lk, device) 
         else:
             szq = q_lens[0].item() if q_lens != None else lq
             szk = k_lens[0].item() if k_lens != None else lk
             if szq != lq or szk != lk:
-                cu_seqlens_q = torch.tensor([0, szq, lq], dtype=torch.int32, device="cuda")
-                cu_seqlens_k = torch.tensor([0, szk, lk], dtype=torch.int32, device="cuda")
+                cu_seqlens_q = torch.tensor([0, szq, lq], dtype=torch.int32, device=device)
+                cu_seqlens_k = torch.tensor([0, szk, lk], dtype=torch.int32, device=device)
             else:
-                cu_seqlens_q = torch.tensor([0, lq], dtype=torch.int32, device="cuda")
-                cu_seqlens_k = torch.tensor([0, lk], dtype=torch.int32, device="cuda")
+                cu_seqlens_q = torch.tensor([0, lq], dtype=torch.int32, device=device)
+                cu_seqlens_k = torch.tensor([0, lk], dtype=torch.int32, device=device)
             q = q.squeeze(0)
             k = k.squeeze(0)
             v = v.squeeze(0)

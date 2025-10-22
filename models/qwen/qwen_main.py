@@ -212,7 +212,7 @@ class model_factory():
             loras_slists=loras_slists,
             joint_pass = joint_pass,
             denoising_strength=denoising_strength,
-            generator=torch.Generator(device="cuda").manual_seed(seed),
+            generator=torch.Generator(device="cpu").manual_seed(seed) if not torch.cuda.is_available() else torch.Generator(device="cuda").manual_seed(seed),
             lora_inpaint = image_mask is not None and model_mode == 1,
             outpainting_dims = outpainting_dims,
             qwen_edit_plus = qwen_edit_plus,
