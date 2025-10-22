@@ -1924,7 +1924,7 @@ for f, s in [(fl.locate_file("Florence2/modeling_florence2.py"), 127287)]:
     except: pass
 
 models_def = {}
-family_handlers = ["models.wan.wan_handler", "models.wan.df_handler", "models.hyvideo.hunyuan_handler", "models.ltx_video.ltxv_handler", "models.flux.flux_handler", "models.qwen.qwen_handler"]
+family_handlers = ["models.wan.wan_handler", "models.wan.df_handler", "models.hyvideo.hunyuan_handler", "models.ltx_video.ltxv_handler", "models.flux.flux_handler", "models.qwen.qwen_handler", "models.chatterbox.chatterbox_handler"]
 
 
 # only needed for imported old settings files
@@ -3003,7 +3003,12 @@ def load_models(model_type, override_profile = -1):
         offloadobj = offload.profile(pipe, profile_no= profile, compile = compile, quantizeTransformer = False, loras = loras_transformer, coTenantsMap= {}, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, **kwargs)
     except (AssertionError, RuntimeError) as e:
         if "CUDA" in str(e):
-            print("CUDA not available, using CPU-only mode without memory management optimization")
+            # Check if we have MPS available instead of CUDA
+            if torch.backends.mps.is_available():
+                print("🚀 MPS (Apple Silicon GPU) detected - using MPS acceleration without mmgp memory management")
+                print("   Note: mmgp memory management is CUDA-only, but MPS GPU acceleration is active")
+            else:
+                print("CUDA not available, using CPU-only mode without memory management optimization")
             offloadobj = None
         else:
             raise e  
@@ -4578,7 +4583,10 @@ def enhance_prompt(state, prompt, prompt_enhancer, multi_images_gen_type, overri
             enhancer_offloadobj = offload.profile(pipe, profile_no= profile, **kwargs)
         except (AssertionError, RuntimeError) as e:
             if "CUDA" in str(e):
-                print("CUDA not available for enhancer, using CPU-only mode")
+                if torch.backends.mps.is_available():
+                    print("🚀 MPS (Apple Silicon GPU) detected for enhancer - using MPS acceleration without mmgp memory management")
+                else:
+                    print("CUDA not available for enhancer, using CPU-only mode")
                 enhancer_offloadobj = None
             else:
                 raise e  
@@ -5368,6 +5376,13 @@ def generate_video(
                 if time.time() - encoding_start_time > encoding_timeout:
                     raise TimeoutError(f"Encoding phase timed out after {encoding_timeout} seconds")
                 
+                print(f"🚀 Starting Hunyuan Video Avatar generation...")
+                print(f"   Device: {wan_model.device}")
+                print(f"   Model type: {model_type}")
+                print(f"   Video length: {video_length} frames")
+                print(f"   Resolution: {height}x{width}")
+                
+                generation_start_time = time.time()
                 samples = wan_model.generate(
                     input_prompt = prompt,
                     image_start = image_start_tensor,  
@@ -5447,6 +5462,12 @@ def generate_video(
                     outpainting_dims = outpainting_dims,
                     face_arc_embeds = face_arc_embeds,
                 )
+                
+                generation_time = time.time() - generation_start_time
+                print(f"✅ Hunyuan Video Avatar generation completed!")
+                print(f"   Generation time: {generation_time:.2f} seconds")
+                print(f"   Output shape: {samples.shape if samples is not None else 'None'}")
+                
             except TimeoutError as e:
                 print(f"Generation timeout: {e}")
                 gen["process_status"] = "error"

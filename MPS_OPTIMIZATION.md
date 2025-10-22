@@ -112,3 +112,4 @@ The optimization works by:
 5. Providing fallback mechanisms for compatibility
 
 Your M3 Ultra Mac Studio should now utilize its full potential! 🚀
+

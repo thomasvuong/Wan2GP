@@ -79,3 +79,4 @@ if __name__ == "__main__":
     print_system_info()
     device = get_optimal_device()
     print(f"🎯 Selected device: {device}")
+

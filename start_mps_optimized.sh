@@ -38,3 +38,4 @@ echo "   - MPS Built: $(python -c 'import torch; print(torch.backends.mps.is_bui
 # Start the application
 echo "🎬 Starting Wan2GP with MPS acceleration..."
 python wgp.py --server-port 7861
+
