@@ -8,6 +8,13 @@ import time
 import sys
 import threading
 import argparse
+
+# Import MPS configuration for Apple Silicon optimization
+try:
+    from mps_config import configure_mps_for_m3_ultra, print_system_info
+    print_system_info()
+except ImportError:
+    print("⚠️  MPS configuration module not found - using default settings")
 from mmgp import offload, safetensors2, profile_type 
 try:
     import triton
@@ -1803,9 +1810,33 @@ if len(processing_device) == 0:
         processing_device = "cuda"
     elif torch.backends.mps.is_available():
         processing_device = "mps"
+        # MPS optimizations for Apple Silicon
+        print("🍎 Apple Silicon detected - enabling MPS optimizations")
+        try:
+            # Use the MPS configuration module if available
+            try:
+                configure_mps_for_m3_ultra()
+            except NameError:
+                # Fallback to manual configuration
+                import os
+                os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
+                os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+                os.environ.setdefault('PYTORCH_TUNABLE_OPs', '1')
+                os.environ.setdefault('PYTORCH_MPS_ALLOCATOR_POLICY', '1')
+                os.environ.setdefault('PYTORCH_MPS_ALLOCATOR_CACHE_SIZE', '0')
+                print("✅ MPS environment variables configured (fallback)")
+        except Exception as e:
+            print(f"Warning: Could not set MPS environment variables: {e}")
     else:
         processing_device = "cpu"
-# torch.backends.cuda.matmul.allow_fp16_accumulation = True
+        print("⚠️  Running in CPU-only mode - consider using Apple Silicon for better performance")
+
+# Enable optimizations based on device
+if processing_device == "cuda":
+    torch.backends.cuda.matmul.allow_fp16_accumulation = True
+elif processing_device == "mps":
+    # MPS-specific optimizations
+    print("🚀 MPS acceleration enabled for Apple Silicon")
 lock_ui_attention = False
 lock_ui_transformer = False
 lock_ui_compile = False

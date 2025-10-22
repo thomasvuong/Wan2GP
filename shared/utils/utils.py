@@ -25,10 +25,21 @@ os.environ["U2NET_HOME"] = os.path.join(os.getcwd(), "ckpts", "rembg")
 from PIL import Image
 video_info_cache = []
 def get_device():
-    """Get the best available device (CUDA > MPS > CPU)"""
+    """Get the best available device (CUDA > MPS > CPU) with MPS optimizations"""
     if torch.cuda.is_available():
         return "cuda"
     elif torch.backends.mps.is_available():
+        # Enable MPS optimizations for Apple Silicon
+        if hasattr(torch.backends.mps, 'is_available') and torch.backends.mps.is_available():
+            # Set MPS memory management for large RAM systems
+            try:
+                import os
+                os.environ.setdefault('PYTORCH_MPS_HIGH_WATERMARK_RATIO', '0.0')
+                os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
+                os.environ.setdefault('PYTORCH_TUNABLE_OPs', '1')
+                print("🚀 MPS optimizations enabled for Apple Silicon")
+            except Exception as e:
+                print(f"Warning: Could not set MPS optimizations: {e}")
         return "mps"
     else:
         return "cpu"
